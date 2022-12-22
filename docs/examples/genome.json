@@ -1,0 +1,6 @@
+{
+  "name": "GRCh38",
+  "speciesName": "Homo sapiens",
+  "star_index": "s3://scale.pub/testData/rna/grch38/star.ann",
+  "gtf": "s3://scale.pub/testData/rna/grch38/Homo_sapiens.GRCh38.103.biotypeFiltR.gtf"
+}

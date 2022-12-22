@@ -1,0 +1,9 @@
+[Settings]
+CreateFastqForIndexReads,1
+TrimUMI,0
+MinimumTrimmedReadLength,16
+MaskShortReads,16
+OverrideCycles,Y34;U10;Y76
+[Data]
+Sample_ID
+ScaleRna

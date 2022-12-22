@@ -1,0 +1,12 @@
+name: scaleRna
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python
+  - samtools
+  - fastqc
+  - multiqc
+  - cutadapt
+  - star=2.7.10b

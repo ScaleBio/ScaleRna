@@ -1,0 +1,14 @@
+name: scalereport
+channels:
+  - defaults
+dependencies:
+  - pandas
+  - numpy 
+  - plotly
+  - scipy
+  - matplotlib 
+  - pip
+  - pip:
+    - datapane
+    - kaleido
+    - argparse

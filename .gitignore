@@ -1,0 +1,5 @@
+**/__pycache__/
+.nextflow
+.nextflow*
+.*.swp
+bin/bc_parser
