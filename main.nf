@@ -107,7 +107,7 @@ process trimFq {
 input:
 	tuple(val(name), path(transFastq), path(bcFastq))
 output: 
-	tuple(path("trimmed/${transName}.fastq.gz"), path("trimmed/${bcName}.fastq.gz"), emit: fastq)
+	tuple(val(name), path("trimmed/${transName}.fastq.gz"), path("trimmed/${bcName}.fastq.gz"), emit: fastq)
 	path("${name}.trim_stats"), emit: stats
 tag "$name"
 
@@ -226,6 +226,8 @@ main:
 
 	if (params.trimFastq) {
 		trimFq(demuxFqs)
+		demuxFqs = trimFq.out.fastq
+		demuxFqs.dump(tag:'trimmedFqs')
 	}
 	if (params.fastqc) {
 		fastqc(fqSamples.flatMap{it.get(1)})
@@ -262,7 +264,7 @@ script:
 	barcodeParam = library["star_barcode_param"]
 """
 	STAR --runThreadN $task.cpus --genomeDir $indexDir  --outSAMtype BAM SortedByCoordinate --soloCellReadStats Standard \
-	$barcodeParam $params.starTrimming \
+	$barcodeParam ${params.starTrimming} \
 	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers PropUnique \
 	--readFilesIn $transcriptFq $barcodeFq --readFilesCommand zcat \
     --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
