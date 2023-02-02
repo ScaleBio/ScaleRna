@@ -8,16 +8,16 @@ The first column is required to be `sample` and contains the name of each sample
  Column | Description | Example
 :---- | ---- | :----:
 sample | Sample name | Foobar-2
-libName | Name for the sequencing library / fastq files | ScaleRna
 barcodes | RT-plate wells used for this sample | 1A-2H
-expectedCells | Approximate number of single cells in this sample | 50000
+libName | Name for the sequencing library / fastq files (optional)| ScaleRna
+expectedCells | Approximate number of single cells in this sample (optional) | 50000
 
 * `sample` and `libName` should consist only of letters, numbers, dash (-) and dot (.)
 * When running from pre-existing fastq file input, `libName` should match the first part of the fastq file name for this sample, e.g.: `Foo1` for `Foo1_*.fastq.gz`.
 * `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution.
 
 ## Demultiplexing samples
-During analysis the sequencing data is first converted into library fastq files (`libName` column). If multiple samples were included in one sequencing library, these are then be demultiplexed based on the sample (RT) barcodes. In that case the same library is repeated on multiple lines, once for each sample, with the specific tn5-wells for each listed in `barcodes`. E.g.
+During analysis the sequencing data is first converted into library fastq files (`libName` column). If multiple samples were included in one sequencing library, these are then demultiplexed based on the sample (RT) barcodes. E.g.
 
 sample | barcodes
 -- | --
@@ -28,5 +28,5 @@ The RT wells used for each sample are given in `barcodes` as either
 * An individual value (`1A`)
 * A range of wells (`1A-2H`)
     * Wells are sorted first by number then by letter, i.e. `1A-1H`.
-    * Note that all ranges are read in column-wise order; e.g. 1A-2C, refers to 1A-1H (all of column 1) plus 2A-2C.
+    * Note that all ranges are read in **column-wise** order; e.g. 1A-2C, refers to 1A-1H (all of column 1) plus 2A-2C.
 * A list of values or ranges, separated by semicolon (`;`) (`1A;2A-2D`)

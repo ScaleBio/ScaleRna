@@ -1,17 +1,14 @@
 # Fastq generation
-We recommend using [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) from Illumina for fastq generation.
+The workflow can be started from a sequencer runFolder (bcl). In that case fastq files will be generated internally, using Illumina bcl-convert. Alternatively it is also possible to generate fastq files upstream, for example when sequencing at a core facility.
+In that case we also recommend using [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html), but older versions of the Illumina software are also possible.
 
-An example [samplesheet.csv](examples/samplesheet.csv) with typical options is included.
+An example [samplesheet.csv](examples/samplesheet.csv) with typical options is included. Here all 96 barcode sequences from the PCR plate are merged into one sample.
 
 ## Index reads
-For ScaleBio RNA libraries the RT and ligarion barcodes are included in read 1, while the PCR barcode is in the index read. Hence we need to tell `bcl-convert` to ignore the index read for sample demultiplexing. This can be achieved by declaring the _I1_ read as a `UMI` and generating index read fastqs; using `samplesheet.csv` settings:
-```
-CreateFastqForIndexReads,1
-TrimUMI,0
-OverrideCycles,Y34;U10;Y76
-```
+For ScaleBio RNA libraries the RT and ligarion barcodes are included in read 1, while the PCR barcode is in the index read. Hence we need to tell `bcl-convert` to generate index read fastqs using the `samplesheet.csv` setting:
 
 ## Using pre-generated fastq files as workflow input
-Set `--fastqDir` to the directory containing all fastq files for all samples in an analysis run. The filenames should follow the pattern `<Name>_..._<Read>_...fastq.gz`, where
-* `Name` is the library name (`libName` column in `samples.csv`)
+Set `--fastqDir` to the directory containing the fastq files. 
+The file names should follow the pattern `<LibraryName>_..._<Read>_...fastq.gz`, where
+* `Name` is the library name (`ScaleRNA` by default, can be set in the `libName` column in `samples.csv`)
 * `Read` is one of `R1`, `R2`, `I1`

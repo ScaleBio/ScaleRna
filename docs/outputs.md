@@ -1,6 +1,7 @@
 # Outputs
 
 Analysis workflow results for all samples in the run will appear in the output directory defined by `--outDir` (`ScaleRna.out` by default). 
+For detailed information about the library and sample level QC reports see [qcReport.md](qcReport.md)
 
 ## Key output files
 | Directory                   | File                                            | Description                                                                                                                                                                                                                                                                                  |
@@ -12,4 +13,6 @@ Analysis workflow results for all samples in the run will appear in the output d
 | `demux/<libName>.demux` | `<sample>.fastq.gz`                             | Sample fastq files (Demultiplexed) |
 | `star/<sample>` | `Aligned.sortedByCoord.out.bam` | Read alignments to genome, with single-cell barcode and UMI information in tags
 |  | `Solo.out` | STARSolo output for each sample. See https://github.com/alexdobin/STAR/blob/master/docs/STARsolo.md |
-|  `star/<sample>/Solo.out/GeneFull_Ex50pAS` | `raw/matrix.mtx` | Cell-gene expression matrix (for Seurat/Scanpy etc.) |
+|  `star/<sample>.Solo.out/GeneFull_Ex50pAS` | `raw/matrix.mtx` | Unfiltered gene expression matrix for all barcodes |
+
+The geme expression matrix directories (.mtx) can be loaded into Seurat, ScanPy or similar tools for visualization or downstream analysis.

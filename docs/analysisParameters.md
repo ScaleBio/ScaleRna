@@ -8,7 +8,7 @@ Alternatively each option is this file can also be set on the nextflow command-l
 
 
 ## Inputs
-The workflow can either start from an Illumina sequencer runFolder (bcl files) or a directory with (pre-generated) fastq files. Specify either
+The workflow can either start from an Illumina sequencer runFolder (bcl files) or a directory with fastq files. Specify either
 * runFolder : "path/to/runFolder" <br>
 or
 * fastqDir : "path/to/fastqs"

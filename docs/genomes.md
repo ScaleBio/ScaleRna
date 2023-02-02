@@ -6,7 +6,7 @@ The `genome.json` file includes
 Field |  Description | Required? | Example
 :-- | -- | -- | --
 name | The name of the species / genome-version | Required | human 
-star_index | Path to the STAR index directory | Required | `/PATH/TO/star.ann` 
+star_index | Path to the STAR index directory | Required | `/PATH/TO/star.ref` 
 gtf | Path to the gene annotation | Required | `filteredGTF/genes.gtf` 
 speciesName | Full name of the species from [OrgDb](https://www.bioconductor.org/packages/release/BiocViews.html#___OrgDb) | optional | Homo sapiens
 
@@ -16,7 +16,10 @@ speciesName | Full name of the species from [OrgDb](https://www.bioconductor.org
     - a AWS S3 url (s3://path/to/genome)
 
 ## STAR index
-The provided STAR index needs to be compatible with STAR 2.7. It also has to include the gene annotation, e.g. be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options.
+The provided STAR index needs to be compatible with STAR 2.7. It also has to include the gene annotation, e.g. be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options. An example command would be
+```
+STAR --runMode genomeGenerate --runThreadN 16 --genomeDir star.ref --genomeFastaFiles Homo_sapiens.GRCh38.dna.primary_assembly.fa --sjdbGTFfile Homo_sapiens.GRCh38.103.biotypeFiltered.gtf
+```
 
 ## Annotation
 All annotated transcripts in the provided _GTF_ file are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index.
