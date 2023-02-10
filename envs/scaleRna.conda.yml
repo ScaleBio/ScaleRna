@@ -4,9 +4,9 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - python
-  - samtools
-  - fastqc
-  - multiqc
-  - cutadapt
+  - python=3.10
+  - samtools=1.16.1
+  - fastqc=0.11.9
+  - multiqc=1.14
+  - cutadapt=4.2
   - star=2.7.10b
