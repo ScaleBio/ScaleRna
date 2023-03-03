@@ -1,8 +1,8 @@
-[Settings],
+[Settings]
 CreateFastqForIndexReads,1
 MinimumTrimmedReadLength,16
 MaskShortReads,16
-[Data],
+[Data]
 Sample_ID,index
 ScaleRna,TCGGATTCGG
 ScaleRna,TCCGGCTTAT

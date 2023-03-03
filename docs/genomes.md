@@ -1,5 +1,5 @@
 # Reference genomes
-The workflow requires a genome reference and annotation to run. All files and settings for a genome are defined in a [genome.json](examples/genomes.json) file. When launching the workflow, the reference genome is selected by passing the path to a specific `genome.json` in the `--genome` parameter.
+The workflow requires a genome reference and gene annotation to run. All files and settings for a genome are defined in a [genome.json](examples/genome.json) file. When launching the workflow, the reference genome is selected by passing the path to a specific `genome.json` in the `--genome` parameter.
 
 The `genome.json` file includes
 
@@ -16,7 +16,7 @@ speciesName | Full name of the species from [OrgDb](https://www.bioconductor.org
     - a AWS S3 url (s3://path/to/genome)
 
 ## STAR index
-The provided STAR index needs to be compatible with STAR 2.7. It also has to include the gene annotation, e.g. be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options. An example command would be
+The provided STAR index needs to be built with STAR version `>= 2.7.4a`. It also has to include the gene annotation, e.g. be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options. An example command would be
 ```
 STAR --runMode genomeGenerate --runThreadN 16 --genomeDir star.ref --genomeFastaFiles Homo_sapiens.GRCh38.dna.primary_assembly.fa --sjdbGTFfile Homo_sapiens.GRCh38.103.biotypeFiltered.gtf
 ```

@@ -7,6 +7,10 @@ In addition to third-party and open-source software the workflow also uses execu
 	- Barcode and read-level metrics
 
 ## Installation
-These tools are included in the `scaleRna` docker container image; when running the workflow in the recommended configuration with `-profile docker` (or another container engine, such as _singularity_, _podman_ etc.), they will be automatically available.
+These tools are included in the `scaleRna` docker container image; when running the workflow with `-profile docker` (or another container engine, such as _singularity_, _podman_ etc.), they will be automatically available.
 
- These tool are however currently not available through Conda, so if running without a container system (_docker_ or _singularity_), they need to be installed first. A download script to get static pre-compiled binaries for linux (*x86_64*) is provided in `envs/download-scale-tools.sh`. It will install the binaries in the `bin` directory inside the nextflow workflow, from where they will be available to the workflow.
+ These tool are however currently not available through Conda, so if running without a container system, they need to be installed first. A download script to get static pre-compiled binaries for linux (*x86_64*) is included; Simply run:
+
+```/PATH/TO/ScaleRNA/envs/download-scale-tools.sh```
+ 
+  This will install the binaries in `ScaleRMA/bin` (inside the Nextflow workflow directory), from where they will be available during workflow execution.
