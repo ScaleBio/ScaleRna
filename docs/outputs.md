@@ -4,15 +4,19 @@ Analysis workflow results for all samples in the run will appear in the output d
 For detailed information about the library and sample level QC reports see [qcReport.md](qcReport.md)
 
 ## Key output files
-| Directory                   | File                                            | Description                                                                                                                                                                                                                                                                                  |
-|-----------------------------|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `reports`                   | `<sample>.report.html`                          | An interactive standalone HTML report including key metrics/figures for each sample |
-| | `<sample>.reportStatistics.tsv`                 | Summary and QC metrics for this sample in tsv (text) format                                                                                                                   |
-| | `library_<libName>.report.html`                 | Barcode summary and demultiplexing statistics for the whole library (potentially multiple samples) |
-| `fastq/fastqc/`             | `<libName>_fastqc.html`                     | [fastqc](https://github.com/s-andrews/FastQC) report for the sequencing library|
-| `demux/<libName>.demux` | `<sample>.fastq.gz`                             | Sample fastq files (Demultiplexed) |
-| `star/<sample>` | `Aligned.sortedByCoord.out.bam` | Read alignments to genome, with single-cell barcode and UMI information in tags
-|  | `Solo.out` | STARSolo output for each sample. See https://github.com/alexdobin/STAR/blob/master/docs/STARsolo.md |
-|  `star/<sample>.Solo.out/GeneFull_Ex50pAS` | `raw/matrix.mtx` | Unfiltered gene expression matrix for all barcodes |
+| Directory | File | Description |
+|-----------|------|-------------|
+| `reports` | `<sample>.report.html` | An interactive standalone HTML report including key metrics/figures for each sample |
+| | `<sample>.reportStatistics.tsv` | Summary and QC metrics for this sample in tsv (text) format |
+| | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole library (potentially multiple samples) |
+| | `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastqc and trimming |
+|  `samples` | `<sample>.filtered/matrix.mtx` | Pre-filtered gene expression matrix for cells above the unique read threshold. |
+| | `<sample>.allCells.csv` | Metrics per cell-barcode, including barcodes / well positions
+| `fastq` | `fastqc/*_fastqc.html` | [fastqc](https://github.com/s-andrews/FastQC) report for each fastq file in the sequencing library |
+| | `Reports/` | Fastq generation summary reports from [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) |
+| `barcodes/<libName>.demux` | `<sample>.fastq.gz` | Sample fastq files (Demultiplexed and barcode error-corrected); only included with `--fastqOut true` |
+| `alignment` | `<sample>.star.align/` | [STAR](https://github.com/alexdobin/STAR) alignment output, including BAM file, with single-cell barcode and UMI information in tags
+|  | `<sample>.star.solo/` | [STARSolo](https://github.com/alexdobin/STAR/blob/master/docs/STARsolo.md) output for each sample
 
-The geme expression matrix directories (.mtx) can be loaded into Seurat, ScanPy or similar tools for visualization or downstream analysis.
+
+The gene expression matrix directories (.mtx) can be loaded into Seurat, ScanPy or similar tools for visualization or downstream analysis.

@@ -8,58 +8,57 @@ The file called _library_<LibraryName>.report.html_ contains the summary report 
 This table gives the barcode matching statistics for the full library. Reads that fail barcode matching are not assigned to any sample and are hence not included in any downstream analysis or metrics.
  
 **Pass**: Reads for which all expected barcodes were found \
-**LinkerError**: Reads which were filtered because the fixed linker sequence between the barcodes could not be found \
-**BarcodeError**: Reads for which at least one barcode could not be matched against the expected sequences (whitelist) \
-**SequenceError**: Reads excluded from barcode matching, e.g. because they were too short
+**Error**: Reads which were filtered because at least one barcode could not be found or matched against the expected sequences (whitelist). These reads are excluded from all further analysis.
   
 ### Reads per Sample
-**Reads per Sample** and **Reads Per RT Well** show the number of (Barcode passing) reads assinged to each sample based on the RT barcode. These are read counts before alignment and UMI collapsing.
+**Reads per Sample** shows the number of reads assigned to each sample based on the RT barcode match. These are total reads before alignment and duplicate removal.
 
-### Cells tab
-These tables show detailed metrics gor each barcode element (RT, Ligation, PCR barcodes and UMI).
 
-**Exact**: The read contains an exact (no errors) match against one of the expected sequences (whitelist) for this barcode \
-**Corrected**: The barcode sequence contains at least one mismatch, but could be corrected to an unique whitelist sequence \
-**Ambiguous**: The barcode sequence has the same number of mismatches to two different whitelist sequences and is hence filtered \
-**NoMatch**: The barcode sequence cannot be matched to any whitelist sequence \
-**Error**: No barcode sequence can be extracted; typically because the linker sequence used to locate it in the read was not found \
+### Barcodes tab
+Heatmaps showing the total unique transcript counts (complexity) for each well (barcode) of the RT, ligation and PCR plates respectively.
 
-The UMI is a random sequence with no whitelist. In that case all sequences containing 'N's or pure homopolymers are **Filtered**, other sequences are **Pass**.
-  
+
 ## Sample Report
 
 The files called _<SampleName>.report.html_ contain the summary report for a single sample, i.e. all or a subset of RT wells from a ScaleRNA library. It shows read, cell and barcode level summary metrics and plots for library and sample QC.
 
-### STARSolo Metrics
+### Mapping Metrics
 
-**Total Reads**: The number of reads (pairs) input for this sample. This is after matching the barcodes (and possibly demultiplexing on the RT barcode), but before any alignent filters \
+**Total Reads**: The number of RNA reads assigned to this sample. This is after matching the barcodes (see above) and possibly demultiplexing samples based on the RT barcode in the samplesheet. Read are counted after read-trimming, but before alignment \
 **Reads Mapped to Genome**: The fraction of _Total Reads_ that are aligned anywhere to the genome \
-**Reads Mapped to Transcript**: The fraction of _Total Reads_ that are mapped to the genome overlapping an annotated transcript (exon or intron, in sense direction). \
-**Reads Mapped to unique Transcript**: The fraction of _Total Reads_ that are mapped to the genome overlapping exactly one transcript uniquely \
+**Reads Mapped to Transcriptome**: The fraction of _Reads Mapped to Genome_ that match one or more annotated genes (exon or intron, in sense direction) \
+**Exonic Reads**: The fraction of _Reads Mapped to Genome_ overlapping an exon (by at least 50% of their length) in the sense direction \
+**Antisense Reads**: The fraction of _Reads Mapped to Genome_ overlapping an exon in the antisense direction (opposite from gene annotation) \
+**Mitochondrial Reads**: The fraction of reads mapping to the mitochondrial genome \
+**Saturation**: The overall sequencing saturation level of this sample. _Saturation_ is defined as `1 - (UniqueReads / TotalReads)` on _Reads Mapped to Transcriptome_.
 
-### Cell Calling
-All numbers in this table depend on the selected threshold to separate cells from background barcodes (automatic or manual)
 
-**Cells above Threshold**: The number of cell barcodes passing the _Unique Reads Threshold_ \
-**Unique Reads Threshold**: The UMI threshold to separate cells from background barcodes \
-**Mean Reads per cell**: The mean number of reads for each cell barcode passing the _Unique Reads Threshold_ \
-**Median UMIs per cell**: The median number of unique reads (UMIs) for each cell counted towards expression of a gene; i.e. the number of transcripts detected \
+### Cell Metrics
+**Note**: All numbers in this table depend on the number of cells called and hence on the _Unique Transcript Counts Threshold_. Check the threshold indicated on the _Barcode Rank plot_.
+
+**Unique Transcript Counts Threshold**: The minimum number of unique reads mapped to transcripts required to separate cells from background barcodes \
+**Cells above Threshold**: The number of cell barcodes passing the _Unique Transcript Counts Threshold_ \
+**Mean Reads per cell**: The mean number of total reads for each cell (before alignment) \
+**Median Unique Transcript Counts per cell**: The median number of unique reads for each cell matching a transcript; i.e. the number of transcripts detected \
 **Median Genes per cell**: The median number of unique genes detected per cell \
-**Reads in Cells**: The fraction of reads that come from a cell passing threshold rather than a background barcode \
-**Median Saturation**: The median sequencing saturation level in a cell. _Saturation_ is 1 - (_UMIs_ / _genic reads_) \
+**Reads in Cells**: The fraction of reads that come from a cell rather than a background barcode
 
-**Median Genic Reads**: The median per-cell fraction of reads mapping to a transcript (exon or intron) in sense direction \
-**Median Exonic Reads**: The fraction of _Genic Reads_ overlapping an exon (by at least 50% of their length) \
-**Median Antisense Reads**: The proportion of reads overlapping a transcript in the antisense orientation relative to *Genic Reads* (sense orientation) \
-**Median Mitochondrial Reads**: The fraction of reads mapping to the mitochondrial genome
 
 ### Plots
-#### Genes vs. UMIs detected
-This shows the number of UMIs (transcripts detected) and unique genes detected for each cell-barcode. _pass_ are cells passing the threshold.
+#### Barcode Rank plot
+This shows the unique transcript counts for each cell-barcode, sorted from high to low. The _Unique Transcript Counts Threshold_ is indicated by a dashed line, separating (estimated) cells from background barcodes.
+
+#### Complexity plot
+This shows a statistical estimate for the unique transcript counts that would be observed at different shallower sequencing levels.
+
+#### Genes Detected Per Cell
+This shows the number of unique genes detected for each cell-barcode relative to the total reads for that barcode. _pass_ are cells passing the _Unique Transcript Counts Threshold_.
 
 #### Saturation Per Cell
-This shows the total number of reads vs. the sequencing saturation for each cell-barcode. _pass_ are cells passing the threshold.
+This shows the total number of reads vs. the sequencing saturation for each cell-barcode.
 
 ### Barcodes Tab
-The plots on the left show the number of cells (cell-barcodes passing the threshold) with each RT, ligation and PCR barcode respectively. \
-The plots of the right show the number of UMIs per cell for each of these.
+The plots on the left show the number of cells with each RT barcode. \
+The plots of the right show the complexity (median unique transcript counts per cell) for each of these.
+
+A breakdown of ligation and PCR barcodes is in the library report.

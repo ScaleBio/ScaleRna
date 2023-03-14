@@ -3,7 +3,7 @@
 This is a Nextflow workflow to run analysis of ScaleBio single-cell RNA sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-count matrix, etc.), and QC reports.
 
 ## Getting started
-* First install [Nextflow](http://www.nextflow.io)
+* First install [Nextflow](http://www.nextflow.io) (22.04 or later)
 * Download this workflow to your machine
 * Install [dependencies](docs/dependencies.md)
 * Launch the small pipeline [test run](#workflow-test)
@@ -17,7 +17,7 @@ This is a Nextflow workflow to run analysis of ScaleBio single-cell RNA sequenci
     * Path to the Illumina Sequencer RunFolder (bcl files)
     * If you prefer to start from fastq files, generated outside (before) this workflow, see [Fastq generation](docs/fastqGeneration.md).
 * Sample Table
-    * A .csv file listing all samples in the analysis with their library (PCR) index and (optional) tagmentation sample barcode sequences. See [samples.csv](docs/samplesCsv.md).
+    * A .csv file listing all samples in the analysis, optionally split by RT barcode. See [samples.csv](docs/samplesCsv.md).
 * Reference Genome
     * The workflow requires a reference genome, including a [STAR](https://github.com/alexdobin/STAR) index for alignment, and gene annotation. See [Reference Genomes](docs/genomes.md)
 
@@ -31,7 +31,17 @@ A small test run, with all input data stored online, can be done with
 
 `nextflow run /PATH/TO/ScaleRna -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --outDir output`
 
-See [dependencies](docs/dependencies) for the best `PROFILE` to use on your system.
+See [dependencies](docs/dependencies.md) for the best `PROFILE` to use on your system.
+
+Note that this run will automatically download the example data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
+```
+aws s3 sync s3://scale.pub/testData/rna/PBMC/221104_NB551228_0182_AHCCFKBGXN 221104_NB551228_0182_AHCCFKBGXN
+aws s3 sync s3://scale.pub/testData/rna/grch38 grch38
+```
+and then run with
+```
+nextflow run /PATH/TO/ScaleRna/ -profile docker,singularity --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome grch38/grch38.json --runFolder 221104_NB551228_0182_AHCCFKBGXN --outDir /PATH/TO/OUTPUT_DIR
+```
 
 ### Nextflow Command-line
 **Note** that `nextflow` options are given with a single `-` (e.g. `-profile`), while workflow parameters (e.g. `--outDir`) are given with a double dash `--`.

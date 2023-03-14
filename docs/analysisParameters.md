@@ -32,7 +32,11 @@ Run `nextflow run path/to/ScaleRna --help` for a description of available option
 
 System options (compute resource requirements, etc.) as well as all parameter defaults, are in the workflow [nextflow.config](../nextflow.config).
 
-#### Library Structure Definition
+### Selected optional parameters
+Setting `bamOut` to false will suppress alignment (.bam file) output from STAR. Gene expression results (.mtx), and all other workflow outputs, are still generated of course.
+If the user does not specifically need alignments for custom downstream analysis, disabling BAM output will save compute time and storage space.
+
+### Library Structure Definition
 * libStructure : "libV1.json"
 
 The library structure JSON file defines 

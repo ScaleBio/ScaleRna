@@ -1,5 +1,6 @@
 nextflow.enable.dsl=2
 
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 // Load .json file into object
@@ -33,6 +34,12 @@ def loadGenome(json) {
 	genome.star_index = expandPath(genome.star_index, baseDir)
 	genome.gtf = expandPath(genome.gtf, baseDir)
 	return genome
+}
+
+def getReadFromFqname(fqName) {
+    m = ( fqName =~ /_([RI][12])[_.]/ )
+    if (!m) { return null }
+    return m[0][1]
 }
 
 // Load per-sample read-counts from bcParser output
@@ -90,12 +97,13 @@ input:
 	path(samplesheet)
 output: 
 	path("fastq/*fastq.gz"), emit: fastq
-	path("fastq/Reports"), emit: stats
+	path("fastq/Reports/*"), emit: stats
 publishDir "${params.outDir}/", pattern: 'fastq/Reports/*', mode: 'copy'
-publishDir "${params.outDir}/", pattern: 'fastq/*.fastq.gz'
+publishDir "${params.outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
+
 
 script:
-	pthreads = ((task.cpus-4)/3).round()
+	pthreads = ((task.cpus)/3 - 0.5).round()
 """
 	bcl-convert --sample-sheet $samplesheet --bcl-input-directory $run \
     --bcl-num-conversion-threads $pthreads --bcl-num-compression-threads $pthreads --bcl-num-decompression-threads $pthreads \
@@ -107,7 +115,7 @@ process trimFq {
 input:
 	tuple(val(name), path(transFastq), path(bcFastq))
 output: 
-	tuple(val(name), path("trimmed/${transName}.fastq.gz"), path("trimmed/${bcName}.fastq.gz"), emit: fastq)
+	tuple(val(name),path("trimmed/${transName}.fastq.gz"), path("trimmed/${bcName}.fastq.gz"), emit: fastq)
 	path("${name}.trim_stats"), emit: stats
 tag "$name"
 
@@ -116,7 +124,7 @@ script:
 	bcName = bcFastq.getSimpleName()
 """
 	mkdir trimmed
-	cutadapt -j${task.cpus} -a A{8}N{100} -e0.15 -O2 -m16 -o trimmed/${transName}.fastq.gz -p trimmed/${bcName}.fastq.gz $transFastq $bcFastq > ${name}.trim_stats
+	cutadapt -j${task.cpus} -e0.15 -O2 -m16 ${params.trimAdapt} -o trimmed/${transName}.fastq.gz -p trimmed/${bcName}.fastq.gz $transFastq $bcFastq > ${name}.trim_stats
 """
 }
 
@@ -124,16 +132,16 @@ script:
 // Note that these are the input fastq files, not outputs of bcParser
 process fastqc {
 input:
-	path(fqs)
+	path(fq)
 output:
 	path("fastqc/*.html"), emit: html
 	path("fastqc/*.zip"), emit: zip
-publishDir "${params.outDir}/fastq/fastqc", mode: 'copy'
+publishDir "${params.outDir}/fastq/", mode: 'copy'
 label 'small'
-
+tag "${getReadFromFqname(fq)}"
 """
 	mkdir fastqc
-	fastqc -o fastqc $fqs
+	fastqc -o fastqc $fq
 """
 }
 
@@ -144,7 +152,7 @@ input:
 output:
 	path("multiqc_report.html")
 publishDir "${params.outDir}/reports", mode: 'copy'
-tag "small"
+label "small"
 
 """
 	multiqc .
@@ -162,11 +170,11 @@ input:
 output:
 	tuple(val(libName), path("$outDir/*_S[1-9]*_R?[._]*fastq.gz"), emit: readFq)
 	tuple(val(libName), path("$outDir/*_S[1-9]*_BC[._]*fastq.gz"), emit: bcFq)
-	path("$outDir/*_S0_*.fastq.gz"), emit: unknown optional true
+	path("$outDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
 	path("$outDir/*.tsv")
 	tuple(val(libName), path("$outDir/metrics.json"), emit: metrics)
-publishDir "${params.outDir}/demux/", pattern: "$outDir/*gz"
-publishDir "${params.outDir}/demux/", mode: 'copy', pattern: "$outDir/*{txt,tsv,json}" //, saveAs: {"${libName}.${it.getName()}"}
+publishDir "${params.outDir}/barcodes/", pattern: "$outDir/*gz", enabled: params.fastqOut
+publishDir "${params.outDir}/barcodes/", mode: 'copy', pattern: "$outDir/*{txt,tsv,json}"
 tag "$libName"
 
 script:
@@ -230,7 +238,9 @@ main:
 		demuxFqs.dump(tag:'trimmedFqs')
 	}
 	if (params.fastqc) {
-		fastqc(fqSamples.flatMap{it.get(1)})
+		// Exclude I1 and I2 from fastqc
+		mainReads = fqSamples.flatMap{it.get(1)}.filter{getReadFromFqname(it.getName())[0] == 'R'}
+		fastqc(mainReads)
 		reports = fastqc.out.zip
 		if (runDir != null) {
 			reports = reports.mix(bclconvert.out.stats)
@@ -246,70 +256,171 @@ emit:
 	metrics = barcodeParser.out.metrics
 }
 
+// Run the STAR executable on demuxed fastq files
 process starsolo {
 input: 
 	path(indexDir) // STAR genome index
 	val(library) // library.json (contains STAR barcode parameters)
 	tuple(val(sample), path(transcriptFq), path(barcodeFq)) // transcript and BC fastq file
 output: 
-	tuple(val(sample), path("$starDir/Aligned.sortedByCoord.out.bam*"), emit: bam)
+	tuple(val(sample), path("$starDir/Aligned.sortedByCoord.out.bam*"), emit: bam, optional: true)
 	tuple(val(sample), path("$starDir/Log*"), emit: log)
-	tuple(val(sample), path("${sample}.Solo.out"), emit: solo)
-publishDir "${params.outDir}/star", pattern: "${sample}.Solo.out", mode: 'copy', saveAs: {'Solo.out'}
-publishDir "$params.outDir/star"
+	tuple(val(sample), path("${sample}.star.solo"), emit: solo)
+publishDir "${params.outDir}/alignment", pattern: "*.solo", mode: 'copy'
+publishDir "${params.outDir}/alignment", pattern: "$starDir/*"
 //memory { ( indexDir.directorySize() < 32000000000 ? 32.GB : 64.GB ) * task.attempt }
 tag "$sample"
 script:
-	starDir = "${sample}.align"
+	starDir = "${sample}.star.align"
 	barcodeParam = library["star_barcode_param"]
+	if (params.bamOut) {
+		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outSAMunmapped Within"
+    } else {
+        bamOpts = "--outSAMtype None" 
+    }
 """
-	STAR --runThreadN $task.cpus --genomeDir $indexDir  --outSAMtype BAM SortedByCoordinate --soloCellReadStats Standard \
+	STAR --runThreadN $task.cpus --genomeDir $indexDir \
 	$barcodeParam ${params.starTrimming} \
+    $bamOpts --outSJtype None --soloCellReadStats Standard \
 	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers PropUnique \
 	--readFilesIn $transcriptFq $barcodeFq --readFilesCommand zcat \
-    --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM \
 	--outFileNamePrefix $starDir/
-	mv $starDir/Solo.out ${sample}.Solo.out
+	mv $starDir/Solo.out ${sample}.star.solo
 """
 }
 
-process sampleReport {
+// Run cell typing on STARsolo output
+process cellTyping {
+input:
+	tuple(val(sample), val(libName), path("demuxMetrics.json"), path("Solo.out"), val(expectedCells), path("filtered_matrix"))
+output:
+	path("${sample}")
+tag "$sample"
+publishDir "$params.outDir/cellTyping", mode: 'copy'
+script:
+"""
+	runScrublet.py --counts filtered_matrix --outDir .
+	assignTypes.R --projName=${sample} --countDir=filtered_matrix --scrubletOut=scrublet_output_table.csv --StarMtxFormat=yes
+"""
+}
+
+// Generate metrics per sample from STARsolo output
+process sampleMetricsGeneration {
 input:
 	tuple(val(sample), val(libName), path("demuxMetrics.json"), path("Solo.out"), val(expectedCells))
 	path(samplesCsv)
 	path(libJson)
+	path("references")
+	val(isBarnyard)
+output:
+	tuple(val(sample), path("${sample}_metrics/sample_metrics"), emit: sample_metrics_json_for_report)
+	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), emit: cell_metrics)
+	tuple(val(sample), path("${sample}_filtered_star_output"), emit: filtered_star_mtx)
+	
+publishDir "$params.outDir/samples", pattern:"${sample}_filtered_star_output", saveAs:{"${sample}.filtered"}, mode: 'copy'
+publishDir "$params.outDir/samples", pattern:"*/allCells.csv", saveAs:{"${sample}.allCells.csv"}, mode: 'copy'
+
+label 'report'
+tag "$sample"
+script:
+	if (isBarnyard) {
+		opts = "--isBarnyard"
+	}
+	else {
+		opts = ""
+	}
+	if (params.useSTARthreshold) {
+		opts = opts + "--useSTARthreshold"
+	}
+	else {
+		opts = opts + ""
+	}
+
+"""
+	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libStruct ${libJson} \
+	--topCellPercent ${params.topCellPercent} \
+	--minCellRatio ${params.minCellRatio} --minReads ${params.minReads} --star_out Solo.out \
+	$opts
+"""
+}
+
+// Generate report for each sample from metrics generated in sampleMetricsGeneration process
+process sampleReportGeneration {
+input:
+	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), path("${sample}_metrics/sample_metrics"))
+	path(libJson)
+	val(isBarnyard)
 output:
 	path("reports/${sample}.report.html")
 	path("reports/${sample}.reportStatistics.tsv"), emit: stats
-	path("reports/${sample}_figures")
+	path("reports/${sample}_figures"), optional: true
+	path("reports/${sample}_unique_transcript_counts_by_RT_Index_well.csv")
+	path("reports/${sample}_num_cells_by_RT_Index_well.csv")
 publishDir "$params.outDir", mode: 'copy'
 errorStrategy 'ignore'
 label 'report'
 tag "$sample"
 script:
+	if (isBarnyard) {
+                opts = "--isBarnyard"
+        }
+    else {
+                opts = ""
+    }
+	if (params.internalReport) {
+		opts = opts + "--internalReport"
+	}
 """
-	generateReport.py --sample ${sample} --samplesheet ${samplesCsv} --libStruct ${libJson}
+	export TMPDIR=\$(mktemp -p `pwd` -d)
+	generateSampleReport.py --sampleName ${sample} --libDir ${libJson} --sample_metrics ${sample}_metrics $opts
 """
 }
 
-process libraryReport {
+// Generate metrics for each library from the metrics of all samples in the library
+process fastqMetricsGeneration {
 input:
-	tuple(val(libName), path("demuxMetrics.json"), path(soloFiles))
+	tuple(val(sample), val(libName), path("allCells*.csv"), path("sample_metrics"))
 	path(samplesCsv)
-	path(libJson)
 output:
-	path("reports/library_${libName}.report.html")
-	path("reports/library_${libName}*.tsv")
-publishDir "$params.outDir", mode: 'copy'
+	tuple(val(libName), path("library_metrics"))
 errorStrategy 'ignore'
 label 'report'
 tag "$libName"
 script:
 """
-	generateReport.py --libName ${libName} --samplesheet ${samplesCsv} --libStruct ${libJson}
+	getFastqMetricsFromSampleMetrics.py --sample_metrics allCells* --samplesheet ${samplesCsv} --libName ${libName}
 """
 }
 
+// Generate report for each library from metrics generated in fastqMetricsGeneration
+process fastqReportGeneration {
+input:
+	tuple(val(libName), path("metrics"))
+	path(libJson)
+	path("references")
+output:
+	path("reports/library_${libName}.report.html")
+	path("reports/library_${libName}*.tsv")
+	path("reports/unique_reads_ligation_well.csv")
+	path("reports/unique_reads_pcr_well.csv")
+	path("reports/unique_reads_rt_well.csv")
+publishDir "$params.outDir", mode: 'copy'
+label 'report'
+tag "$libName"
+script:
+	if (params.internalReport) {
+		opts = "--internalReport"
+	}
+	else {
+		opts = ""
+	}
+"""
+	export TMPDIR=\$(mktemp -p `pwd` -d)
+	generateFastqReport.py --libName ${libName} --libDir ${libJson} --libMetrics metrics $opts
+"""
+}
+
+// Generate multi sample report from output of sampleReportGeneration
 process multiSampleReport {
 input:
 	path(sampleStats)
@@ -333,29 +444,70 @@ workflow {
 	regularizeSamplesCsv(file(params.samples))
 	samplesCsv = regularizeSamplesCsv.out
 	samples = samplesCsv.splitCsv(header:true, strip:true)
-	samples.dump(tag:'samples')
+	
 	libJson = expandPath(params.libStructure, file("${projectDir}/references/"))
 	libStructure = loadJson(libJson)
 	genome = loadGenome(file(params.genome))
 
+	isBarnyard = genome.get('isBarnyard', false)
+	
 	inputReads(samples, samplesCsv, libJson)
-	inputReads.out.metrics.dump(tag:'demuxMetrics')
+	
 	sampleDemuxMetrics = inputReads.out.metrics.cross(samples.map{[it.libName,it.sample]}).map({[it[1][1], it[0][0], it[0][1]]})
 
 	starsolo(genome.star_index, libStructure,  inputReads.out.fqs)
-	starsolo.out.solo.dump(tag:'solo')
 
-	reportTemplate = file("${projectDir}/report/reportRna.ipynb")
 	expectedCells = samples.map{[it.sample, toIntOr0(it.expectedCells)]}
 	stats =  sampleDemuxMetrics.join(starsolo.out.solo).join(expectedCells)
-	stats.dump(tag:'stats')
-	sampleReport(stats, samplesCsv, libJson)
-	multiSampleReport(sampleReport.out.stats.collect())
-
-	// Library level report (all samples with same libName in one report)
-	statsByLib = stats.map{ row -> 
-		return tuple(row[1], row[2], row[3]) // (libName, libMetrics, soloOut)
-	}.groupTuple(by:[0,1]) // groupBy (libName, libMetrics)
-	statsByLib.dump(tag:'statsGroupedFastq')
-	libraryReport(statsByLib, samplesCsv, libJson)
+	
+	sampleMetricsGeneration(stats, samplesCsv, libJson, "${projectDir}/references", isBarnyard)
+	sampleMetricsBySample = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.sample_metrics_json_for_report)
+	sampleReportGeneration(sampleMetricsBySample, libJson, isBarnyard)
+	
+	// Group by libName
+	metricsByLib = sampleMetricsBySample.groupTuple(by: 1)
+	fastqMetricsGeneration(metricsByLib, samplesCsv)
+	multiSampleReport(sampleReportGeneration.out.stats.collect())
+	
+	fastqReportGeneration(fastqMetricsGeneration.out, libJson, "${projectDir}/references")
+	cellTypingInput = stats.join(sampleMetricsGeneration.out.filtered_star_mtx)
+	if (params.cellTyping) {
+		cellTyping(cellTypingInput)
+	}
+}
+workflow.onComplete {
+	def data = ["Workflow Information": ["Execution status": "${ workflow.success ? 'OK' : 'failed' }",
+								         "Pipeline completion timestamp": "$workflow.complete",
+								         "Git repo URL": "$workflow.repository",
+								         "Configuration files": "$workflow.configFiles",
+         		 						 "Container": "$workflow.container",
+		         						 "Command line executed": "$workflow.commandLine",
+				         				 "Configuration profile": "$workflow.profile",
+						         		 "Start timestamp": "$workflow.start",
+         								 "Stop timestamp": "$workflow.complete",
+									 "Run name": "$workflow.runName",
+		         						 "Duration": "$workflow.duration"]]
+	def params_data = ["Parameters": [:]]
+	for (p in params) {
+		if (!p.key.contains('-')) {
+			params_data."Parameters".put("$p.key", "$p.value")
+		}
+        
+    }
+	def reference_data = ["Reference Genome": [:]]
+	for (p in genome) {
+		reference_data."Reference Genome".put("$p.key", "$p.value")
+	}
+	def manifest_data = ["Manifest": [:]]
+	for (p in workflow.manifest.getProperties()) {
+		p = p.toString()
+		def split_str = p.split("=")
+		if (split_str[0].equals("name") || split_str[0].equals("version")) {
+			manifest_data."Manifest".put(split_str[0], split_str[1])
+		}
+	}
+	def json_str = JsonOutput.toJson(data+params_data+reference_data+manifest_data)
+	def json_beauty = JsonOutput.prettyPrint(json_str)
+	workflow_info = file("$params.outDir/workflow_info.json")
+	workflow_info.write(json_beauty)
 }
