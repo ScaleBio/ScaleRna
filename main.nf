@@ -115,16 +115,16 @@ process trimFq {
 input:
 	tuple(val(name), path(transFastq), path(bcFastq))
 output: 
-	tuple(val(name),path("trimmed/${transName}.fastq.gz"), path("trimmed/${bcName}.fastq.gz"), emit: fastq)
+	tuple(val(name),path("trimmed/${transName}"), path("trimmed/${bcName}"), emit: fastq)
 	path("${name}.trim_stats"), emit: stats
 tag "$name"
 
 script:
-	transName = transFastq.getSimpleName()
-	bcName = bcFastq.getSimpleName()
+	transName = transFastq.getName()
+	bcName = bcFastq.getName()
 """
 	mkdir trimmed
-	cutadapt -j${task.cpus} -e0.15 -O2 -m16 ${params.trimAdapt} -o trimmed/${transName}.fastq.gz -p trimmed/${bcName}.fastq.gz $transFastq $bcFastq > ${name}.trim_stats
+	cutadapt -j${task.cpus} -e0.15 -O2 -m16 ${params.trimAdapt} -o trimmed/${transName} -p trimmed/${bcName} $transFastq $bcFastq | tee ${name}.trim_stats
 """
 }
 
@@ -324,7 +324,7 @@ label 'report'
 tag "$sample"
 script:
 	if (isBarnyard) {
-		opts = "--isBarnyard"
+		opts = "--isBarnyard "
 	}
 	else {
 		opts = ""
@@ -362,13 +362,13 @@ label 'report'
 tag "$sample"
 script:
 	if (isBarnyard) {
-                opts = "--isBarnyard"
+                opts = "--isBarnyard "
         }
     else {
                 opts = ""
     }
 	if (params.internalReport) {
-		opts = opts + "--internalReport"
+		opts = opts + "--internalReport "
 	}
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
