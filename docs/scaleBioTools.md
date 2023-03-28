@@ -13,4 +13,4 @@ These tools are included in the `scaleRna` docker container image; when running 
 
 ```/PATH/TO/ScaleRNA/envs/download-scale-tools.sh```
  
-  This will install the binaries in `ScaleRMA/bin` (inside the Nextflow workflow directory), from where they will be available during workflow execution.
+  This will install the binaries in `ScaleRNA/bin` (inside the Nextflow workflow directory), from where they will be available during workflow execution.

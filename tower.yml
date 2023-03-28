@@ -1,0 +1,7 @@
+reports:
+    "reports/*.report.html":
+        display: "QC Summary report"
+    "reports/multiqc_report.html":
+        display: "FASTQ MultiQC"
+    "reports/allSamples.reportStatistics.csv":
+        display: "All sample metrics"
