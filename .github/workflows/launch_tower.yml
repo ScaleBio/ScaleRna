@@ -1,0 +1,21 @@
+name: Launch test run on tower
+
+on: pull_request
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    env:
+      TOWER_ACCESS_TOKEN: ${{ secrets.TOWER_ACCESS_TOKEN }}
+      BRANCH_NAME: ${{ github.head_ref }}
+      REPO_NAME: ${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Launch tower run
+        run: |
+          export PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+          python .github/scripts/launch_test_run.py --pr_number $PR_NUMBER --branch $BRANCH_NAME --repo_name $REPO_NAME
