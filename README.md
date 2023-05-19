@@ -69,3 +69,10 @@ In addition [Nextflow tower](https://tower.nf) offers another simple way to mana
 
 # Versions and Updates
 See the [Change log](changelog.md)
+
+# License
+For License information see [LICENSE.md](LICENSE.md).
+
+By purchasing product(s) and downloading the software product(s) of ScaleBio, You accept all of the terms of the [License Agreement](LICENSE.md). If You do not agree to these terms and conditions, You may not use or download any of the software product(s) of ScaleBio. 
+
+

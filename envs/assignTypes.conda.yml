@@ -20,5 +20,6 @@ dependencies:
   - bioconductor-limma=3.50.1
   - bioconductor-scater=1.22.0
   - r-seurat=4.1.1
-  - r-remotes
+  - r-remotes=2.4.2
+  - r-yaml=2.3.7
   - scrublet=0.2.3

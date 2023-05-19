@@ -24,7 +24,7 @@ def validateName(name):
                   file=sys.stderr)
             sys.exit(1)
 
-def main(samplesCsv):
+def main(samplesCsv, splitFastq):
     """
     Writes normalized samples.csv to stdout
     Args:
@@ -84,7 +84,21 @@ def main(samplesCsv):
         cols.insert(1, "libName")
         for r in rows.values():
             r.insert(1, "ScaleRna")
-    
+    if "barcodes" not in cols:
+        cols.insert(len(cols), "barcodes")
+        for r in rows.values():
+            r.insert(len(cols), "1A-12H")
+    else: # check whether each entry for barcodes is empty or not
+        barcodesIndex = cols.index("barcodes")
+        for r in rows.values():
+            if r[barcodesIndex].strip() == "":
+                r[barcodesIndex]="1A-12H"
+    if splitFastq:
+        if "split" not in cols:
+            cols.insert(len(cols), "split")
+            for r in rows.values():
+                r.insert(len(cols), "true")
+
     w = csv.writer(sys.stdout)
     w.writerow(cols)
     w.writerows(rows.values())   
@@ -94,6 +108,6 @@ if __name__ == '__main__':
         description='Standardize samples.csv for the workflow (defaults, column names, etc.')
     parser.add_argument('samples', metavar='SAMPLES.csv',
                     help='CSV with sample names and information for the workflow run')
+    parser.add_argument('--splitSample', help='Flag that denotes whether bcParser will split per RT well to ensure parallelization', action="store_true", default=False)
     args = parser.parse_args()
-
-    main(args.samples)
+    main(args.samples, args.splitSample)

@@ -21,17 +21,10 @@ BARNYARD_COLORMAP = {
     'Mixed': 'rgb(242, 5, 33)', 'Human': 'rgb(36, 36, 227)',
     'Mouse': 'rgb(27, 99, 25)'}
 
-UNKNOWN_COLORMAP = {"Unknown": 'rgb(179, 188, 201)'}
-
 BARCODE_SHORTHAND_TO_NAME = {
     'drop': 'Droplet Barcodes', 'P7': 'P7 Barcodes',
     'lig': 'Ligation Barcodes', 'rt': 'Reverse Transcription Barcodes',
     'umi': 'UMI'}
-
-DEFAULT_COLOR_SEQUENCE = ['#012B64', '#013780', '#00419A', '#014BB0',
-                          '#0454C4', '#045BD3', '#0663E3', '#086AF2',
-                          '#2D80F4', '#448FF7', '#5FA0F9', '#81B3F8',
-                          '#9EC4F9', '#BBD5F9']
 
 # Columns to display in stats tables
 DISPLAY_COLUMNS = ["Metric", "Value"]

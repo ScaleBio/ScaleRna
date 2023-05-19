@@ -14,7 +14,6 @@ from pathlib import Path
 import warnings
 import datapane as dp
 import statistics
-from math import log10
 import functools
 import operator
 import utils.myconstants as constants
@@ -22,11 +21,12 @@ from collections import OrderedDict
 import plotly.express as px
 from dataclasses import dataclass
 from matplotlib import pyplot as plt
+import matplotlib.colors as colors
 
 
 def compare(this, that):
     """
-    Function to compare two variables
+    Compare two variables
 
     Args:
         this (object): First variable to compare
@@ -75,73 +75,6 @@ class GeneralUtils:
         self = self
 
     @staticmethod
-    def loadStatsAsDict(fn):
-        """
-        Function to create a dictionary from a file (@fn)
-        containing tab delimited statistics
-
-        Args:
-            fn (str): Path to file
-
-        Returns:
-            Dictionary containing stats
-        """
-        res = {}
-
-        for line in open(fn):
-            split_line = line.strip().split("\t")
-
-            if not len(split_line) >= 2:
-                continue
-
-            stat = split_line[0]
-            val = split_line[1]
-
-            try:
-                val = int(val)
-
-            except ValueError:
-                try:
-                    val = float(val)
-                except ValueError:
-                    pass
-
-            res[stat] = val
-
-        return res
-
-    @staticmethod
-    def loadStarStatsFromCsv(fn, features):
-        """
-        Function to create a dictionary with information
-        obtained from summary.csv outputted by STAR
-
-        Args:
-            fn (str): Path to summary.csv
-            features (str): Feature type
-
-        Returns:
-            Dictionary containing the statistics
-        """
-        stats = {}
-
-        for line in open(fn):
-            split_line = line.strip().split(',')
-            stats[split_line[0]] = split_line[1]
-
-        starStats = {}
-        starStats['Total Reads'] = f"{int(stats['Number of Reads']):,}"
-        starStats['Saturation'] = f"{float(stats['Sequencing Saturation']):.2}"
-        starStats['Reads Mapped to Genome'] =\
-            f"{float(stats['Reads Mapped to Genome: Unique+Multiple']):.1%}"
-        val = stats[f"Reads Mapped to {features}: Unique+Multiple {features}"]
-        starStats['Reads Mapped to Transcripts'] = f"{float(val):.1%}"
-        val = stats[f"Reads Mapped to {features}: Unique {features}"]
-        starStats['Reads Mapped to unique Transcript'] = f"{float(val):.1%}"
-        starStats['STAR Cells'] = stats["Estimated Number of Cells"]
-        return starStats
-
-    @staticmethod
     def makeTableDict(colNames, values):
         """
         Function to create a simple dictionary from @pair values
@@ -164,7 +97,7 @@ class GeneralUtils:
     @staticmethod
     def reformatIfInt(val):
         """
-        Function to reformat an integer variable
+        Reformat an integer variable
 
         Args:
             val (obj): Variable to reformat
@@ -180,8 +113,7 @@ class GeneralUtils:
             return val
 
     @staticmethod
-    def styleTable(styler, title: str, hideColumnHeaders=False,
-                   boldColumn=None, numericCols=None):
+    def styleTable(styler, title: str, hideColumnHeaders=False, boldColumn=None, numericCols=None):
         """
         Function to modify given @pd.DataFrame.Styler
 
@@ -203,27 +135,16 @@ class GeneralUtils:
         if hideColumnHeaders:
             styler.hide(axis='columns')
         else:
-            styler.set_table_styles(
-                [{'selector': 'th',
-                  'props': [('border', 'black solid !important')]}],
-                overwrite=False)
+            styler.set_table_styles([{'selector': 'th', 'props': [('border', 'black solid !important')]}], overwrite=False)
 
         if boldColumn is not None:
-            styler.set_properties(
-                subset=boldColumn,
-                **{'font-weight': 'bold'}
-            )
+            styler.set_properties(subset=boldColumn, **{'font-weight': 'bold'})
 
         if title != "":
             styler.set_caption(title)
-            styler.set_table_styles(
-                [{'selector': 'caption',
-                  'props': [('border', 'black solid !important'),
-                            ("font-weight", "bold")]}],
-                overwrite=False)
+            styler.set_table_styles([{'selector': 'caption', 'props': [('border', 'black solid !important'), ("font-weight", "bold")]}], overwrite=False)
 
-        styler.set_properties(
-            **{"border-color": 'black', "border-style": 'solid !important'})
+        styler.set_properties(**{"border-color": 'black', "border-style": 'solid !important'})
         return styler
 
     @staticmethod
@@ -263,37 +184,7 @@ class GeneralUtils:
                 GeneralUtils.ensurePathsExist(value)
             else:
                 if not exists(value):
-                    raise FileNotFoundError(
-                        f"{key} was assumed to be located at '{str(value)}'. "
-                        "It is missing")
-
-    @staticmethod
-    def makeDir(dirName: Path):
-        """
-        Function to make a directory
-
-        Args:
-            dirName (path): Path object pointing to a directory that is to
-                be created
-        """
-        if not exists(dirName):
-            mkdir(dirName)
-
-    @staticmethod
-    def resolveWriteDir(resultsDir: Union[str, None]) -> Path:
-        """
-        Function to return path object to directory for writing reports to
-
-        Args:
-            resultsDir (str): Path to results directory
-
-        Returns:
-            Path object pointing to directory to write reports to
-        """
-        if (resultsDir is None):
-            return Path(".", "reports")
-        else:
-            return Path(resultsDir, 'reports')
+                    raise FileNotFoundError(f"{key} was assumed to be located at '{str(value)}'. It is missing")
 
 
 class DatapaneUtils:
@@ -302,7 +193,7 @@ class DatapaneUtils:
     """
     @staticmethod
     def createTableIgnoreWarning(styler, label=None) -> dp.Table:
-        '''
+        """
         Function that creates wrapper around dp.Table which suppresses
         warning that arises from  code within dp.Table calling Styler.render():
         'this method is deprecated in favour of `Styler.to_html()`'
@@ -313,75 +204,86 @@ class DatapaneUtils:
 
         Returns:
             dp.Table object
-        '''
+        """
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
 
             return dp.Table(styler, label=label)
 
-    @staticmethod
-    def makeScatterPlot(dataFrame: pd.DataFrame, xVar: str, yVar: str,
-                        colorBy: str, title: str, isLogX: bool, isLogY: bool,
-                        readThresh: int) -> dp.Plot:
+    def getMaxWellNumberAndLetter(fname):
         """
-        Function to return dp.Plot rendering of an interactive plotly express
-        scatter plot
+        Get maximum well coordinate from reference file
 
         Args:
-            dataFrame (pd.DataFrame): Data being visualized
-            xVar (str): x variable being plotted
-            yVar (str): y var being plotted
-            colorBy (str): Categorical variable the points are colored by
-            isLogX (bool): Flag to indicate whether x axis is on log scale
-            isLogY (bool): Flag to indicate whether y axis is on log scale
-            title (str): Title of plot
-            readThresh (int): Minimum number of unique reads. Cells with reads
-                below @readThresh will not be considered in the plot
-
+            fname (str): Path to file
+        
         Returns:
-            dp.Plot object with the scatter plot
+            Maximum letter and maximum number corresponding to the max well coordinate
         """
-        dataFrame = dataFrame[dataFrame['UniqueReads'] >= readThresh]
-        cellsToPlot = dataFrame[:dataFrame['pass'].sum()*2]
-
-        if len(cellsToPlot.index) > constants.SAMPLING_NUMBER:
-            cellsToPlot = cellsToPlot.sample(constants.SAMPLING_NUMBER)
-
-        scatterPlot = px.scatter(
-            cellsToPlot, x=xVar, y=yVar, color=colorBy, title=title,
-            log_x=isLogX, log_y=isLogY,
-            color_discrete_map=constants.QC_COLORMAP,
-            template=constants.DEFAULT_FIGURE_STYLE)
-
-        scatterPlot.update_traces(marker=dict(size=4, opacity=0.5))
-
-        return dp.Plot(scatterPlot)
+        max_letter = "A"
+        max_number = 1
+        with open(fname) as f:
+            for line in f:
+                line = line.strip()
+                split_line = line.split("\t")
+                letter = split_line[1][-1]
+                numbers = int(split_line[1][:-1])
+                max_letter = letter if letter > max_letter else max_letter
+                max_number = numbers if numbers > max_number else max_number
+        return max_letter, max_number
 
     @staticmethod
-    def buildPlatePlot(df, title, colorbar_title=None):
+    def buildPlatePlot(df, title, threshold, colorbar_title=None):
         """
-        Function to build plate like plot for displaying information on a
-        per well basis
+        Build plate like plot for displaying information on a per well basis
 
         Args:
             df (pd.DataFrame): Data to plot
             title (str): Title of the plot
+            threshold (float): Range till which the colorbar is linear, after that it's logscale
+            colorbar_title (str): Colorbar title
 
         Returns:
             Matplotlib figure
         """
         fig = plt.figure()
         if colorbar_title:
-            ax = sns.heatmap(df, linewidth=0.5, cbar_kws={'label': colorbar_title})
+            ax = sns.heatmap(df, linewidth=0.5, cmap=sns.color_palette("dark:#80AAFF", as_cmap=True), norm=colors.SymLogNorm(linthresh=threshold, vmin=0), cbar_kws={'label': colorbar_title})
         else:
-            ax = sns.heatmap(df, linewidth=0.5)
+            ax = sns.heatmap(df, linewidth=0.5, cmap=sns.color_palette("dark:#80AAFF", as_cmap=True), norm=colors.SymLogNorm(linthresh=threshold, vmin=0))
         ax.set_title(title)
 
         return fig
+    
+    def getCharacterIndices(lower_limit, upper_limit):
+        """
+        Generate a list of letter indices from a range of ascii values
+
+        Args:
+            lower_limit (int): Lower limit to generate ascii's from
+            upper_limit (int): Upper limit to generate ascii's till
+        """
+        return [chr(i) for i in range(lower_limit, upper_limit)]
+
+    def buildDfForSamplePlatePlot(libJson, index, referencesPath):
+        well_dict = {}
+        for entry in libJson["barcodes"]:
+            if "alias" in entry:
+                if entry["alias"] == index.split("_")[0]:
+                    lib_json_entry_dict = entry
+        max_letter, max_number = DatapaneUtils.getMaxWellNumberAndLetter(referencesPath / f'{lib_json_entry_dict["sequences"]}')
+        wellPlateCellCountDf = pd.DataFrame(0, columns=range(1, max_number+1), index=DatapaneUtils.getCharacterIndices(65,ord(max_letter)+1))
+        wellPlateNumCellDf = wellPlateCellCountDf.copy()
+        for i in range(65, ord(max_letter)+1):
+            for j in range(1, max_number+1):
+                key = str(j)+chr(i)
+                well_dict[key] = []
+        return wellPlateCellCountDf, wellPlateNumCellDf, well_dict
+
 
     @staticmethod
-    def barcodeLevelPlots(sampleName: str, cells: pd.DataFrame, possibleIndexValues: List,
-                          index: str, title: str, internalReport: bool, wellAliases=False,
+    def barcodeLevelPlots(referencesPath: Path, sampleName: str, cells: pd.DataFrame, possibleIndexValues: List,
+                          index: str, title: str, internalReport: bool, libJson: dict, wellAliases=False,
                           writeDir=None) -> dp.Group:
         """
         Function to compute statistics to build plate like plot for
@@ -399,78 +301,9 @@ class DatapaneUtils:
         Returns:
             dp.Group object containing all the plots
         """
-        allValues = set(possibleIndexValues)
-        presentValues = set(cells[index].unique())
-        missingIndices = allValues.difference(presentValues)
-
-        if len(missingIndices) > 0:
-            cells = cells.copy(deep=True)
-            dummyValues = []
-
-            for missingIndex in missingIndices:
-                dummyValues.append({index: missingIndex, 'umis': 0})
-
-            cells = pd.concat([cells, pd.DataFrame(dummyValues)])
-
-        cellCountsByIndex = cells.groupby(index).size().reset_index()
-
-        if wellAliases:
-            sortOrder = sorted(
-                list(cells[index].unique()),
-                key=functools.cmp_to_key(CalculationUtils.wellStringComp))
-            cells[index] = pd.Categorical(cells[index], sortOrder)
-            cellCountsByIndex[index] = pd.Categorical(
-                cellCountsByIndex[index], sortOrder)
-            cells.sort_values(index, inplace=True)
-            cellCountsByIndex.sort_values(index, inplace=True)
-
-        else:
-            cells.sort_values(by=[index], inplace=True)
-            cellCountsByIndex.sort_values(by=[index], inplace=True)
-
-        readsPerIndexBox = px.box(
-            cells, y=index, x='umis', log_x=True, height=700,
-            color_discrete_sequence=constants.DEFAULT_COLOR_SEQUENCE,
-            color=index, template=constants.DEFAULT_FIGURE_STYLE,
-            boxmode="overlay",
-            labels={index: title, "umis": "Unique Reads Per Cell"},
-            points=False)
-
-        cellCountsByIndex.rename(columns={0: "CellCount"}, inplace=True)
-        cellCountsByIndex["Number of Cells"] = \
-            cellCountsByIndex.apply(
-                lambda row: 0 if row['CellCount'] == 1 else row['CellCount'],
-                axis=1)
-        well_dict = {}
-        # Plate is 24*16 for ligation
-        if index == "Ligation_alias":
-            wellPlateCellCountDf = \
-                pd.DataFrame(
-                    0, columns=range(1, 25),
-                    index=[chr(i) for i in range(65, 81)])
-            wellPlateNumCellDf = \
-                pd.DataFrame(
-                    0, columns=range(1, 25),
-                    index=[chr(i) for i in range(65, 81)])
-            for i in range(65, 81):
-                for j in range(1, 25):
-                    key = str(j)+chr(i)
-                    well_dict[key] = []
-
-        # Plate is 12*8 for pcr and rt
-        else:
-            wellPlateCellCountDf = \
-                pd.DataFrame(
-                    0, columns=range(1, 13),
-                    index=[chr(i) for i in range(65, 73)])
-            wellPlateNumCellDf = \
-                pd.DataFrame(
-                    0, columns=range(1, 13),
-                    index=[chr(i) for i in range(65, 73)])
-            for i in range(65, 73):
-                for j in range(1, 13):
-                    key = str(j)+chr(i)
-                    well_dict[key] = []
+        wellPlateCellCountDf, wellPlateNumCellDf, well_dict = DatapaneUtils.buildDfForSamplePlatePlot(libJson, index, referencesPath)
+        
+        num_cells_dict = cells[index].value_counts().to_dict() 
         
         for idx, row in cells.iterrows():
             letter = row[index][-1]
@@ -480,14 +313,13 @@ class DatapaneUtils:
             except KeyError as e:
                 print(f"{e}: {letter}{numbers} does not exist")
             
-        for idx, row in cellCountsByIndex.iterrows():
-            letter = row[index][-1]
-            numbers = row[index][:-1]
+        for well in num_cells_dict:
+            letter = well[-1]
+            numbers = well[:-1]
             try:
-                wellPlateNumCellDf.at[letter, int(numbers)] =\
-                    row['Number of Cells']
+                wellPlateNumCellDf.at[letter, int(numbers)] = num_cells_dict[well]
             except KeyError as e:
-                print(f"{e}: {letter}{numbers} does not exist")
+                print(f"{e}: {letter}{numbers} doesn't exist")
 
         
         for key in well_dict:
@@ -498,129 +330,15 @@ class DatapaneUtils:
             else:
                 wellPlateCellCountDf.at[letter, int(numbers)] = int(statistics.median(well_dict[key]))
 
-        readsPerIndexBox = DatapaneUtils.buildPlatePlot(
-            wellPlateCellCountDf, "Unique Transcript Counts Per Cell")
-        cellsPerIndexBar = DatapaneUtils.buildPlatePlot(
-            wellPlateNumCellDf, "Number of cells")
+        readsPerIndexBox = DatapaneUtils.buildPlatePlot(wellPlateCellCountDf, "Unique Transcript Counts Per Cell", 100.0)
+        cellsPerIndexBar = DatapaneUtils.buildPlatePlot(wellPlateNumCellDf, "Number of cells", 1.0)
         namePrefix = title.replace(" ", "_")
         if writeDir is not None and internalReport:
-            cellsPerIndexBar.savefig(
-                writeDir / f"CellCount_By_{namePrefix}_Heatmap.png")
-            readsPerIndexBox.savefig(
-                writeDir / f"UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
-        wellPlateCellCountDf.to_csv(f"reports/{sampleName}_unique_transcript_counts_by_{namePrefix}_well.csv")
-        wellPlateNumCellDf.to_csv(f"reports/{sampleName}_num_cells_by_{namePrefix}_well.csv")
-        return dp.Group(
-            dp.Text(f'## {title}'),
-            dp.Group(dp.Plot(cellsPerIndexBar),
-                     dp.Plot(readsPerIndexBox), columns=2))
-
-    def createPerWellFigures(self, cells: pd.DataFrame) -> List[dp.Plot]:
-        """
-        Function that returns per tagmentation barcode (per well) figures
-        for Barcode tab of report:
-        1. Boxplot of unique reads per cell per well
-        2. Barplot of number of cells per well
-
-        Args:
-            cells (pd.DataFrame): Data to plot
-
-        Returns:
-            List of dp.Plot objects
-        """
-        cells.sort_values(by='tgmtBc', inplace=True, ascending=False)
-
-        readsPerWellBox = px.box(
-            y=cells.tgmtBc, x=cells.UniqueReads, height=700, log_x=True,
-            color=cells.tgmtBc, template="none",
-            labels={'x': "Unique Reads Per Cell"}, notched=True,
-            boxmode="overlay", points=False, title="Unique reads per well")
-        readsPerWellBox.update_yaxes(visible=False, showticklabels=False)
-        readsPerWellBox.update_layout(showlegend=False)
-
-        tgmtCounts = cells.groupby('tgmtBc').size().reset_index()
-        tgmtCounts.rename(columns={0: "Number of Cells"}, inplace=True)
-        tgmtCounts.sort_values(by='tgmtBc', inplace=True, ascending=False)
-
-        readsPerWellBar = px.bar(
-            tgmtCounts, y="tgmtBc", x="Number of Cells", height=700,
-            template="none", color='tgmtBc',
-            labels={'tgmtBc': 'Tagmentation Barcodes'}, title="Cells per well")
-
-        tgmtLabels = list(tgmtCounts['tgmtBc'])
-        tgmtLabels.sort(reverse=True)
-
-        readsPerWellBox.update_yaxes(categoryorder='array',
-                                     categoryarray=tgmtLabels)
-        readsPerWellBar.update_yaxes(categoryorder='array',
-                                     categoryarray=tgmtLabels)
-        readsPerWellBar.update_layout(showlegend=False)
-
-        return [dp.Plot(readsPerWellBar), dp.Plot(readsPerWellBox)]
-
-    @staticmethod
-    def makeKneePlot(data: pd.DataFrame, field: str, title: str) -> dp.Plot:
-        """
-        Function to make a kneeplot using @field in @data; drawing a
-        vertical line at @threshold
-
-        Args:
-            data (pd.DataFrame): Data to plot
-            field (str): Column to sort dataframe by
-            title (str): Title of plot
-
-        Returns:
-            dp.Plot object that contains the figure
-        """
-        indices = CalculationUtils.getIndicesToInclude(len(data.index))
-        vals = pd.DataFrame()
-
-        cellbarcodeCounts = list(range(len(data.index)))
-        vals['Cell Barcodes'] = [cellbarcodeCounts[i] for i in indices]
-
-        uniqueReads = list(data.sort_values(by=field, ascending=False)[field])
-        vals['Unique Reads'] = [uniqueReads[i] for i in indices]
-
-        fig = px.line(vals, x='Cell Barcodes', y='Unique Reads',
-                      title=title, log_x=True, log_y=True,
-                      template=constants.DEFAULT_FIGURE_STYLE)
-        fig.add_vline(x=data['pass'].sum(), line_dash="dash",
-                      line_color="green")
-
-        # Xlimit set in powers of 10 (10, maximum)
-        fig.update_layout(xaxis_range=[1, log10(vals['Cell Barcodes'].max())])
-
-        return dp.Plot(fig)
-
-    def showAllTicks(plotlyFig):
-        """
-        Function to modify plotly figure to show all ticks
-
-        Args:
-            plotlyFig (obj): Plotly figure
-        """
-        plotlyFig.update_layout(
-            xaxis=dict(tickmode='linear', tick0=1, dtick=1)
-        )
-
-    @staticmethod
-    def createAliasMap(ids):
-        """
-        Function to create an alias map from a list
-
-        Args:
-            ids (list): List to create alias map for
-
-        Returns:
-            Dictionary where key is an entry in @ids and value is
-            corresponding alias
-        """
-        result = {}
-
-        for i, id in enumerate(sorted(ids)):
-            result[id] = str(i)
-
-        return result
+            cellsPerIndexBar.savefig(writeDir / f"{sampleName}_figures" / f"CellCount_By_{namePrefix}_Heatmap.png")
+            readsPerIndexBox.savefig(writeDir / f"{sampleName}_figures" / f"UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
+        wellPlateCellCountDf.to_csv(writeDir / "csv" / f"{sampleName}_unique_transcript_counts_by_{namePrefix}_well.csv")
+        wellPlateNumCellDf.to_csv(writeDir / "csv" / f"{sampleName}_num_cells_by_{namePrefix}_well.csv")
+        return dp.Group(dp.Text(f'## {title}'), dp.Group(dp.Plot(cellsPerIndexBar), dp.Plot(readsPerIndexBox), columns=2))
 
 
 class CalculationUtils:
@@ -650,8 +368,7 @@ class CalculationUtils:
         return num if num != 0 else letter
 
     @staticmethod
-    def getIndicesToInclude(elementCount: int,
-                            result: List[int] = []) -> List[int]:
+    def getIndicesToInclude(elementCount: int, result: List[int] = []) -> List[int]:
         '''
         Function that returns a list of indices in ascending order for
         elements to be included. Used to reduce size of line
@@ -665,7 +382,7 @@ class CalculationUtils:
             Used to reduce size of line plots while retaining overall trend
             shape
         '''
-        logVal = int(round(log10(elementCount)))
+        logVal = int(round(np.log10(elementCount+1)))
         nextDown = int(logVal - 1)
         lowerLimit = int(10**nextDown)
         step = ((logVal)**3) if logVal > 0 else 1
@@ -763,9 +480,5 @@ class CalculationUtils:
         """
         estimatedLibrarySize = CalculationUtils.estLibSize(reads, umis)
         # Total UMIs
-        res = (
-            estimatedLibrarySize * (
-                1 - (((
-                    estimatedLibrarySize - 1) /
-                    (estimatedLibrarySize))**seqDepthInReads)))
+        res = (estimatedLibrarySize * (1 - (((estimatedLibrarySize - 1) / (estimatedLibrarySize))**seqDepthInReads)))
         return int(res) if not np.isnan(res) else res
