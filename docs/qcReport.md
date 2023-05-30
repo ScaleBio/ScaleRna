@@ -2,7 +2,6 @@
 
 ## Library report
 The file called _library_<LibraryName>.report.html_ contains the summary report at the library level, i.e. sequencing, barcode and demultiplexing information for all samples processed in one run of the ScaleRNA kit.
-  
 
 ### Barcode Read Status
 This table gives the barcode matching statistics for the full library. Reads that fail barcode matching are not assigned to any sample and are hence not included in any downstream analysis or metrics.
@@ -15,17 +14,16 @@ This table gives the barcode matching statistics for the full library. Reads tha
 
 
 ### Barcodes tab
-Heatmaps showing the total unique transcript counts (complexity) for each well (barcode) of the RT, ligation and PCR plates respectively.
+Plate-maps showing the total unique transcript counts (complexity) for each well (barcode) of the RT, ligation and PCR plates respectively.
 
 
 ## Sample Report
-
 The files called _<SampleName>.report.html_ contain the summary report for a single sample, i.e. all or a subset of RT wells from a ScaleRNA library. It shows read, cell and barcode level summary metrics and plots for library and sample QC.
 
 ### Mapping Metrics
-
-**Total Reads**: The number of RNA reads assigned to this sample. This is after matching the barcodes (see above) and possibly demultiplexing samples based on the RT barcode in the samplesheet. Read are counted after read-trimming, but before alignment \
-**Reads Mapped to Genome**: The fraction of _Total Reads_ that are aligned anywhere to the genome \
+**Total Reads**: The number of RNA reads assigned to this sample. This is after matching the barcodes (see above) and possibly demultiplexing samples based on the RT barcode in the samplesheet. \
+**Passing Reads**: Reads passing pre-alignment filters, specifically at least 16bp after Poly-A trimming. \
+**Reads Mapped to Genome**: The fraction of _Passing Reads_ that are aligned anywhere to the genome \
 **Reads Mapped to Transcriptome**: The fraction of _Reads Mapped to Genome_ that match one or more annotated genes (exon or intron, in sense direction) \
 **Exonic Reads**: The fraction of _Reads Mapped to Genome_ overlapping an exon (by at least 50% of their length) in the sense direction \
 **Antisense Reads**: The fraction of _Reads Mapped to Genome_ overlapping an exon in the antisense direction (opposite from gene annotation) \
@@ -38,7 +36,7 @@ The files called _<SampleName>.report.html_ contain the summary report for a sin
 
 **Unique Transcript Counts Threshold**: The minimum number of unique reads mapped to transcripts required to separate cells from background barcodes \
 **Cells above Threshold**: The number of cell barcodes passing the _Unique Transcript Counts Threshold_ \
-**Mean Reads per cell**: The mean number of total reads for each cell (before alignment) \
+**Mean Reads per cell**: The mean number of _Passing Reads_ for each cell \
 **Median Unique Transcript Counts per cell**: The median number of unique reads for each cell matching a transcript; i.e. the number of transcripts detected \
 **Median Genes per cell**: The median number of unique genes detected per cell \
 **Reads in Cells**: The fraction of reads that come from a cell rather than a background barcode

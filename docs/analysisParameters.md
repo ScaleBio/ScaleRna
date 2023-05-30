@@ -32,18 +32,16 @@ Run `nextflow run path/to/ScaleRna --help` for a description of available option
 
 System options (compute resource requirements, etc.) as well as all parameter defaults, are in the workflow [nextflow.config](../nextflow.config).
 
-### Selected optional parameters
+### BAM output
 Setting `bamOut` to false will suppress alignment (.bam file) output from STAR. Gene expression results (.mtx), and all other workflow outputs, are still generated of course.
 If the user does not specifically need alignments for custom downstream analysis, disabling BAM output will save compute time and storage space.
 
-#### Distributed execution
-The workflow can be executed with extra parallelism by setting the `splitFastq` parameter to true. Based on what type of input is provided, the workflow has two different modes of parallelism
-* If starting from runFolder (bcl files) and `splitFastq` is set to true
-  1. Samples are split by PCR barcode in the bcl convert step. So we get 96 fastq files for each sample that go into barcode parsing, sample demux and alignment. The split samples are merged downstream
-* If starting from fastq files and `splitFastq` is set to true
-  1. Samples are split by RT barcode in the barcode parsing step, which gives us 96 fastq files for each sample
+### Parallel execution
+The workflow can be executed with extra parallelism by setting the `splitFastq` parameter to `true`. Based on what type of input is provided, the workflow has two different modes of parallelism:
+* *RunFolder*: Samples are split by PCR barcode in the `bcl-convert` step. These 96 fastq files (per library/lane) are processed separately through barcode parsing, trimming and alignment.
+* *Fastq*: Each set of input fastq files (e.g. by lane) is processed separately through barcode parsing. During that step, samples are split further based on the RT barcode. Each resulting file subset goes through trimming and alignment in parallel.
 
-All of this parallelism is abstracted from the user. All the user needs to do is set the `splitFastq` option in [nextflow.config](../nextflow.config) to true.
+Split samples are merged after alignment (gene expression matrix, metric files, etc.).
 
 ### Library Structure Definition
 * libStructure : "libV1.json"

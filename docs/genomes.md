@@ -1,13 +1,13 @@
 # Reference genomes
-The workflow requires a genome reference and gene annotation to run. All files and settings for a genome are defined in a [genome.json](examples/genome.json) file. When launching the workflow, the reference genome is selected by passing the path to a specific `genome.json` in the `--genome` parameter.
+The workflow requires a genome reference and gene annotation to run. All files and settings for a genome are defined in a [genome.json](examples/genome.json) file. When launching the workflow, the reference genome is selected by passing the path to a specific `genome.json` with the `--genome` parameter.
 
 The `genome.json` file includes
 
 Field |  Description | Required? | Example
 :-- | -- | -- | --
-name | The name of the species / genome-version | Required | human 
-star_index | Path to the STAR index directory | Required | `/PATH/TO/star.ref` 
-gtf | Path to the gene annotation | Required | `filteredGTF/genes.gtf` 
+name | The name of the species / genome-version | required | human 
+star_index | Path to the STAR index directory | required | `/PATH/TO/star.ref` 
+gtf | Path to the gene annotation | optional | `filteredGTF/genes.gtf` 
 speciesName | Full name of the species from [OrgDb](https://www.bioconductor.org/packages/release/BiocViews.html#___OrgDb) | optional | Homo sapiens
 
 * All files (`star_index`, `gtf`, ...) can be specified either as
@@ -21,13 +21,15 @@ The provided STAR index needs to be built with STAR version `>= 2.7.4a`. It also
 STAR --runMode genomeGenerate --runThreadN 16 --genomeDir star.ref --genomeFastaFiles Homo_sapiens.GRCh38.dna.primary_assembly.fa --sjdbGTFfile Homo_sapiens.GRCh38.103.biotypeFiltered.gtf
 ```
 
-## Annotation
-All annotated transcripts in the provided _GTF_ file are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index.
+### Annotation
+All transcripts in the _GTF_ file used to built the STAR index are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index.
 
 ## Pre-built genomes
-Pre-build reference genome for human is available for download:
+Pre-build reference genome for human and mouse are available for download:
 * Human: http://scale.pub.s3.amazonaws.com/genomes/rna/grch38.tgz
+* Mouse: http://scale.pub.s3.amazonaws.com/genomes/rna/mm39.tgz
+* Human/Mouse Barnyard: http://scale.pub.s3.amazonaws.com/genomes/rna/grch38_mm39.tgz
 
-Download these to your analysis server, unpack them and then use e.g.
+Download these to your system, unpack them and then use e.g.
 `--genome /PATH/TO/grch38/grch38.json`
 

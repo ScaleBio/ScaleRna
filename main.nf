@@ -172,14 +172,12 @@ script:
 		opts = ""
 	}
 	if (params.useSTARthreshold) {
-		opts = opts + "--useSTARthreshold"
-	} else {
-		opts = opts + ""
+		opts = opts + " --useSTARthreshold"
 	}
 
 """
 	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libJsonName ${libStructName} \
-	--topCellPercent ${params.topCellPercent} --libraryStructPath ${libStructDir}\
+	--topCellPercent ${params.topCellPercentage} --libraryStructPath ${libStructDir}\
 	--minCellRatio ${params.minCellRatio} --minReads ${params.minReads} --star_out Solo.out \
 	--starFeature ${params.starFeature} --starMatrix ${starMatrixFn(params.starMulti)} \
 	$opts

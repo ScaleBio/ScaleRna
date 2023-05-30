@@ -6,11 +6,11 @@ For detailed information about the library and sample level QC reports see [qcRe
 ## Key output files
 | Directory | File | Description |
 |-----------|------|-------------|
-| `reports` | `<sample>.report.html` | An interactive standalone HTML report including key metrics/figures for each sample |
-| | `<sample>.reportStatistics.tsv` | Summary and QC metrics for this sample in tsv (text) format |
-| | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole library (potentially multiple samples) |
-| | `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastqc and trimming |
-|  `samples` | `<sample>.filtered/matrix.mtx` | Pre-filtered gene expression matrix for cells above the unique read threshold. |
+| `reports` | `<sample>.report.html` | A standalone report including key QC metrics and figures for each sample |
+| | `<sample>.reportStatistics.csv` | Summary and QC metrics for this sample in csv format |
+| | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library (potentially multiple samples) |
+| | `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastQC and trimming |
+|  `samples` | `<sample>.filtered/` | Pre-filtered gene expression matrix for cells above the unique read threshold |
 | | `<sample>.allCells.csv` | Metrics per cell-barcode, including barcodes / well positions
 | `fastq` | `fastqc/*_fastqc.html` | [fastqc](https://github.com/s-andrews/FastQC) report for each fastq file in the sequencing library |
 | | `Reports/` | Fastq generation summary reports from [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) |
