@@ -10,6 +10,7 @@ import itertools as it
 import json
 import shutil
 import argparse
+import sys
 from typing import Dict
 from pathlib import Path
 from utils.ReportUtil import CellStat, GeneralUtils
@@ -427,6 +428,12 @@ def generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample):
         f_filtered_mtx.write(f"{header1} {header2} {header3}\n")
     if line_count > 0:
         os.system(f"cat tmp_matrix.mtx >> {filtered_path}/matrix.mtx")
+    
+    try:
+        if os.path.isfile("tmp_matrix.mtx"):
+            os.remove("tmp_matrix.mtx")
+    except Exception as e:
+        print(e, file=sys.stderr)
     
 
 def addStatsAndCallCells(sampleSpecificFilePaths,

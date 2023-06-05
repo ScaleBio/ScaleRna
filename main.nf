@@ -86,7 +86,7 @@ input:
 output: 
 	tuple(val(sample), path("$starDir/Aligned.sortedByCoord.out.bam*"), emit: bam, optional: true)
 	tuple(val(sample), path("$starDir/Log*"), emit: log)
-	tuple(val(sample), path("${sample}.${count}.star.solo"), emit: solo)
+	tuple(val(sample), path("$soloDir"), emit: solo)
 publishDir "$pubDir", pattern: "*.solo", mode: 'copy'
 publishDir "$pubDir", pattern: "$starDir/*bam*"
 publishDir "$pubDir", pattern: "$starDir/Log*", mode: 'copy'
@@ -95,9 +95,11 @@ script:
 	if (params.splitFastq) {
 		pubDir = "${params.outDir}/alignment/split"
 		starDir = "${sample}.${count}.star.align"
+		soloDir = "${sample}.${count}.star.solo"
 	} else {
 		pubDir = "${params.outDir}/alignment"
 		starDir = "${sample}.star.align"
+		soloDir = "${sample}.star.solo"
 	}
 	barcodeParam = library["star_barcode_param"]
 	if (params.bamOut) {
@@ -112,7 +114,7 @@ script:
 	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers ${params.starMulti} \
 	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat \
 	--outFileNamePrefix $starDir/
-	mv $starDir/Solo.out ${sample}.${count}.star.solo
+	mv $starDir/Solo.out $soloDir
 """
 }
 
