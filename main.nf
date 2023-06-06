@@ -3,11 +3,21 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
+include { inputReads } from './inputReads'
+
 // Load .json file into object
 // (reference genomes, library design, etc.)
 def loadJson(json) {
 	def jsonSlurper  = new JsonSlurper()
 	return jsonSlurper.parse( json )
+}
+
+def starMatrixFn(multimappers) {
+	if (multimappers == "Unique") {
+		return "matrix.mtx"
+	} else {
+		return "UniqueAndMult-${multimappers}.mtx"
+	}
 }
 
 // Create a 'file()' from string 'path'
@@ -36,12 +46,6 @@ def loadGenome(json) {
 	return genome
 }
 
-def getReadFromFqname(fqName) {
-    m = ( fqName =~ /_([RI][12])[_.]/ )
-    if (!m) { return null }
-    return m[0][1]
-}
-
 // Load per-sample read-counts from bcParser output
 def loadDemuxReadCounts(demuxMetrics) {
 	def jsonSlurper  = new JsonSlurper()
@@ -53,12 +57,6 @@ def loadDemuxReadCounts(demuxMetrics) {
 	return counts
 }
 
-def throwError(errMessage) {
-	log.error errMessage
-	sleep(200)
-	System.exit(1)
-}
-
 // Prepare samples.csv with defaults, rename legacy columns, etc.
 process regularizeSamplesCsv {
 input: 
@@ -67,193 +65,16 @@ output:
 	path("samples.csv")
 publishDir "${params.outDir}", mode: 'copy'
 label 'small'
-
-"""
-	regularizeSamplesCsv.py samples.in.csv > samples.csv
-"""
-}
-
-// Create a bcl-convert samplesheet for libraries in samples.json
-process makeBclConvertSamplesheet {
-input: 
-	path(samplesCsv)
-	path(lib)
-	path(runinfo)
-output: 
-	path("samplesheet.csv")
-publishDir "${params.outDir}/fastq", mode: 'copy'
-label 'small'
-
-"""
-	bclConvertSheet.py $samplesCsv $lib $runinfo > samplesheet.csv
-"""
-}
-
-/*Run bcl-convert, used when starting from a sequencing run-folder
-  Requires a separate bcl-convert samplesheet*/
-process bclconvert {
-input: 
-	path(run)
-	path(samplesheet)
-output: 
-	path("fastq/*fastq.gz"), emit: fastq
-	path("fastq/Reports/*"), emit: stats
-publishDir "${params.outDir}/", pattern: 'fastq/Reports/*', mode: 'copy'
-publishDir "${params.outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
-
-
 script:
-	pthreads = ((task.cpus)/3 - 0.5).round()
-"""
-	bcl-convert --sample-sheet $samplesheet --bcl-input-directory $run \
-    --bcl-num-conversion-threads $pthreads --bcl-num-compression-threads $pthreads --bcl-num-decompression-threads $pthreads \
-    $params.bclConvertParams --output-directory fastq
-"""
-}
-
-process trimFq {
-input:
-	tuple(val(name), path(transFastq), path(bcFastq))
-output: 
-	tuple(val(name),path("trimmed/${transName}"), path("trimmed/${bcName}"), emit: fastq)
-	path("${name}.trim_stats"), emit: stats
-tag "$name"
-
-script:
-	transName = transFastq.getName()
-	bcName = bcFastq.getName()
-"""
-	mkdir trimmed
-	cutadapt -j${task.cpus} -e0.15 -O2 -m16 ${params.trimAdapt} -o trimmed/${transName} -p trimmed/${bcName} $transFastq $bcFastq | tee ${name}.trim_stats
-"""
-}
-
-// Run fastQC on (a pair of) fastq files from inputs or bcl-convert
-// Note that these are the input fastq files, not outputs of bcParser
-process fastqc {
-input:
-	path(fq)
-output:
-	path("fastqc/*.html"), emit: html
-	path("fastqc/*.zip"), emit: zip
-publishDir "${params.outDir}/fastq/", mode: 'copy'
-label 'small'
-tag "${getReadFromFqname(fq)}"
-"""
-	mkdir fastqc
-	fastqc -o fastqc $fq
-"""
-}
-
-// Use multiQC to report a single QC report for all fastQC and bcl-convert reports
-process multiqc {
-input:
-	path(reports)
-output:
-	path("multiqc_report.html")
-publishDir "${params.outDir}/reports", mode: 'copy'
-label "small"
-
-"""
-	multiqc .
-"""
-}
-
-// Run bcParser to extract and correct cell-barcodes
-// Optionally demuxes fastq files based on some barcodes
-process barcodeParser {
-input:
-	path(sheet) // Samplesheet json
-	path(libStructDir) // Directory containing the library structure definition (barcode sequence lists are loaded from here)
-	val(libStructName) // Filename of the library structure definition .json
-	tuple(val(libName), path(fqFiles)) // Input fastq file
-output:
-	tuple(val(libName), path("$outDir/*_S[1-9]*_R?[._]*fastq.gz"), emit: readFq)
-	tuple(val(libName), path("$outDir/*_S[1-9]*_BC[._]*fastq.gz"), emit: bcFq)
-	path("$outDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
-	path("$outDir/*.tsv")
-	tuple(val(libName), path("$outDir/metrics.json"), emit: metrics)
-publishDir "${params.outDir}/barcodes/", pattern: "$outDir/*gz", enabled: params.fastqOut
-publishDir "${params.outDir}/barcodes/", mode: 'copy', pattern: "$outDir/*{txt,tsv,json}"
-tag "$libName"
-
-script:
-	outDir = "${libName}.demux"
-	libStruct = "$libStructDir/$libStructName"
-"""
-	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --write-fastq --write-barcode-fq --out $outDir
-"""
-}
-
-// Fastq generation, trimming, QC, barcode extraction and sample demux
-workflow inputReads {
-take:
-	samples
-	samplesCsv
-	libJson
-main:
-	runDir = params.runFolder
-	fqDir = params.fastqDir
-	fqs = null
-	if (runDir != null) {
-		if (params.fastqSamplesheet == null) {
-			makeBclConvertSamplesheet(samplesCsv, libJson, 
-				file("$runDir/RunInfo.xml", checkIfExists:true))
-			fqSheet = makeBclConvertSamplesheet.out
-		} else {
-			fqSheet = file(params.fastqSamplesheet)
+	opts=""
+	if (params.splitFastq) {
+		if (params.runFolder == null) {
+			opts += "--splitSample"
 		}
-		bclconvert(file(runDir), fqSheet)
-		fqs = bclconvert.out.fastq.flatten()
-	} else if (fqDir != null) {
-		fqs = Channel.fromPath("$fqDir/*fastq.gz", checkIfExists: true)
-	} else {
-		throwError("Must specify either 'runFolder' or 'fastqDir'")
 	}
-
-	// Organize fastq files by sample
-	fqFiles = fqs.map { file ->
-		def ns = file.getName().toString().tokenize('_')
-		return tuple(ns.get(0), file)
-	}.groupTuple()
-	fqSamples = samples.map({it.libName}).unique().join(fqFiles)
-	fqSamples.dump(tag:'fqSamples')
-
-	// Process cell-barcodes and (optionally) split fastqs into samples based on tagmentation barcode
-	barcodeParser(samplesCsv, libJson.getParent(), libJson.getName(), fqSamples)
-	readFqs = barcodeParser.out.readFq.flatMap({it[1]}).map { file ->
-		def ns = file.getName().toString().tokenize('_')
-		return tuple(ns.get(0), file)
-	}.groupTuple(size:2) // We still get R1 and R2, even if only R2 is used
-	bcFqs = barcodeParser.out.bcFq.flatMap({it[1]}).map { file ->
-		def ns = file.getName().toString().tokenize('_')
-		return tuple(ns.get(0), file)
-	}
-	demuxFqs = readFqs.join(bcFqs).map({tuple(it[0], it[1][1], it[2])})
-	demuxFqs.dump(tag:'demuxFqs')
-
-	if (params.trimFastq) {
-		trimFq(demuxFqs)
-		demuxFqs = trimFq.out.fastq
-		demuxFqs.dump(tag:'trimmedFqs')
-	}
-	if (params.fastqc) {
-		// Exclude I1 and I2 from fastqc
-		mainReads = fqSamples.flatMap{it.get(1)}.filter{getReadFromFqname(it.getName())[0] == 'R'}
-		fastqc(mainReads)
-		reports = fastqc.out.zip
-		if (runDir != null) {
-			reports = reports.mix(bclconvert.out.stats)
-		}
-		if (params.trimFastq) {
-			reports = reports.mix(trimFq.out.stats)
-		}
-		multiqc(reports.collect())
-	}
-
-emit:
-	fqs = demuxFqs
-	metrics = barcodeParser.out.metrics
+"""
+	regularizeSamplesCsv.py samples.in.csv $opts > samples.csv
+"""
 }
 
 // Run the STAR executable on demuxed fastq files
@@ -261,17 +82,25 @@ process starsolo {
 input: 
 	path(indexDir) // STAR genome index
 	val(library) // library.json (contains STAR barcode parameters)
-	tuple(val(sample), path(transcriptFq), path(barcodeFq)) // transcript and BC fastq file
+	tuple(val(sample), val(count), path("transcript*.fastq.gz"), path("barcode*.fastq.gz")) // transcript and BC fastq file
 output: 
 	tuple(val(sample), path("$starDir/Aligned.sortedByCoord.out.bam*"), emit: bam, optional: true)
 	tuple(val(sample), path("$starDir/Log*"), emit: log)
-	tuple(val(sample), path("${sample}.star.solo"), emit: solo)
-publishDir "${params.outDir}/alignment", pattern: "*.solo", mode: 'copy'
-publishDir "${params.outDir}/alignment", pattern: "$starDir/*"
-//memory { ( indexDir.directorySize() < 32000000000 ? 32.GB : 64.GB ) * task.attempt }
+	tuple(val(sample), path("$soloDir"), emit: solo)
+publishDir "$pubDir", pattern: "*.solo", mode: 'copy'
+publishDir "$pubDir", pattern: "$starDir/*bam*"
+publishDir "$pubDir", pattern: "$starDir/Log*", mode: 'copy'
 tag "$sample"
 script:
-	starDir = "${sample}.star.align"
+	if (params.splitFastq) {
+		pubDir = "${params.outDir}/alignment/split"
+		starDir = "${sample}.${count}.star.align"
+		soloDir = "${sample}.${count}.star.solo"
+	} else {
+		pubDir = "${params.outDir}/alignment"
+		starDir = "${sample}.star.align"
+		soloDir = "${sample}.star.solo"
+	}
 	barcodeParam = library["star_barcode_param"]
 	if (params.bamOut) {
 		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outSAMunmapped Within"
@@ -282,25 +111,41 @@ script:
 	STAR --runThreadN $task.cpus --genomeDir $indexDir \
 	$barcodeParam ${params.starTrimming} \
     $bamOpts --outSJtype None --soloCellReadStats Standard \
-	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers PropUnique \
-	--readFilesIn $transcriptFq $barcodeFq --readFilesCommand zcat \
+	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers ${params.starMulti} \
+	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat \
 	--outFileNamePrefix $starDir/
-	mv $starDir/Solo.out ${sample}.star.solo
+	mv $starDir/Solo.out $soloDir
+"""
+}
+
+// Merge smaller raw STAR outputs for a single sample into a single merged raw STAR output
+// Run only when splitFastq is set to true
+process merge_star {
+input:
+    tuple(val(sample), path("Solo.out*"))
+output:
+    tuple(val(sample), path("${sample}.star.solo/"), emit: merge)
+publishDir "$params.outDir/alignment", mode:'copy'
+script:
+"""
+    mergeRawSTARoutput.py --star_dirs Solo.out* --star_feature ${params.starFeature} --star_matrix ${starMatrixFn(params.starMulti)} --sample_name ${sample}
 """
 }
 
 // Run cell typing on STARsolo output
 process cellTyping {
 input:
-	tuple(val(sample), val(libName), path("demuxMetrics.json"), path("Solo.out"), val(expectedCells), path("filtered_matrix"))
+	tuple(val(sample), val(libName), path("cellReadMetrics"), path("filteredMatrix"))
 output:
 	path("${sample}")
 tag "$sample"
 publishDir "$params.outDir/cellTyping", mode: 'copy'
 script:
 """
-	runScrublet.py --counts filtered_matrix --outDir .
-	assignTypes.R --projName=${sample} --countDir=filtered_matrix --scrubletOut=scrublet_output_table.csv --StarMtxFormat=yes
+	runScrublet.py --counts filteredMatrix --outDir .
+
+	assignTypesAnalysis.R --projectName ${sample} --countDir filteredMatrix --scrubletPath scrublet_output_table.csv --metricsPath cellReadMetrics --clusterNormalization LogNormalize --StarMtxFormat --seurat --azimuth --writeSeuratMeta --writeSeuratMarkers
+	assignTypesPlots.R --projectName ${sample} --plotRtBc --qcPlots
 """
 }
 
@@ -309,9 +154,9 @@ process sampleMetricsGeneration {
 input:
 	tuple(val(sample), val(libName), path("demuxMetrics.json"), path("Solo.out"), val(expectedCells))
 	path(samplesCsv)
-	path(libJson)
-	path("references")
+	val(libStructName)
 	val(isBarnyard)
+	path(libStructDir)
 output:
 	tuple(val(sample), path("${sample}_metrics/sample_metrics"), emit: sample_metrics_json_for_report)
 	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), emit: cell_metrics)
@@ -324,22 +169,19 @@ label 'report'
 tag "$sample"
 script:
 	if (isBarnyard) {
-		opts = "--isBarnyard "
-	}
-	else {
+		opts = "--isBarnyard"
+	} else {
 		opts = ""
 	}
 	if (params.useSTARthreshold) {
-		opts = opts + "--useSTARthreshold"
-	}
-	else {
-		opts = opts + ""
+		opts = opts + " --useSTARthreshold"
 	}
 
 """
-	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libStruct ${libJson} \
-	--topCellPercent ${params.topCellPercent} \
+	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libJsonName ${libStructName} \
+	--topCellPercent ${params.topCellPercentage} --libraryStructPath ${libStructDir}\
 	--minCellRatio ${params.minCellRatio} --minReads ${params.minReads} --star_out Solo.out \
+	--starFeature ${params.starFeature} --starMatrix ${starMatrixFn(params.starMulti)} \
 	$opts
 """
 }
@@ -347,15 +189,16 @@ script:
 // Generate report for each sample from metrics generated in sampleMetricsGeneration process
 process sampleReportGeneration {
 input:
-	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), path("${sample}_metrics/sample_metrics"))
-	path(libJson)
+	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), path("${sample}_metrics/sample_metrics"), path("trim_stats*.json"))
+	val(libJson)
 	val(isBarnyard)
+	path(libStructDir)
 output:
 	path("reports/${sample}.report.html")
-	path("reports/${sample}.reportStatistics.tsv"), emit: stats
+	path("reports/csv/${sample}.reportStatistics.csv"), emit: stats
 	path("reports/${sample}_figures"), optional: true
-	path("reports/${sample}_unique_transcript_counts_by_RT_Index_well.csv")
-	path("reports/${sample}_num_cells_by_RT_Index_well.csv")
+	path("reports/csv/${sample}_unique_transcript_counts_by_RT_Index_well.csv")
+	path("reports/csv/${sample}_num_cells_by_RT_Index_well.csv")
 publishDir "$params.outDir", mode: 'copy'
 errorStrategy 'ignore'
 label 'report'
@@ -363,8 +206,7 @@ tag "$sample"
 script:
 	if (isBarnyard) {
                 opts = "--isBarnyard "
-        }
-    else {
+    } else {
                 opts = ""
     }
 	if (params.internalReport) {
@@ -372,7 +214,7 @@ script:
 	}
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateSampleReport.py --sampleName ${sample} --libDir ${libJson} --sample_metrics ${sample}_metrics $opts
+	generateSampleReport.py --sampleName ${sample} --libJsonName ${libJson} --libraryStructPath ${libStructDir} --sample_metrics ${sample}_metrics --trim_stats trim_stats* $opts
 """
 }
 
@@ -380,15 +222,14 @@ script:
 process fastqMetricsGeneration {
 input:
 	tuple(val(sample), val(libName), path("allCells*.csv"), path("sample_metrics"))
-	path(samplesCsv)
 output:
-	tuple(val(libName), path("library_metrics"))
+	tuple(val(libName), path("library_${libName}_metrics"))
 errorStrategy 'ignore'
 label 'report'
 tag "$libName"
 script:
 """
-	getFastqMetricsFromSampleMetrics.py --sample_metrics allCells* --samplesheet ${samplesCsv} --libName ${libName}
+	getFastqMetricsFromSampleMetrics.py --sample_metrics allCells* --libName ${libName}
 """
 }
 
@@ -396,27 +237,23 @@ script:
 process fastqReportGeneration {
 input:
 	tuple(val(libName), path("metrics"))
-	path(libJson)
-	path("references")
+	val(libJson)
+	path(libStructDir)
 output:
 	path("reports/library_${libName}.report.html")
-	path("reports/library_${libName}*.tsv")
-	path("reports/unique_reads_ligation_well.csv")
-	path("reports/unique_reads_pcr_well.csv")
-	path("reports/unique_reads_rt_well.csv")
+	path("reports/csv/library_${libName}*.csv")
 publishDir "$params.outDir", mode: 'copy'
 label 'report'
 tag "$libName"
 script:
 	if (params.internalReport) {
 		opts = "--internalReport"
-	}
-	else {
+	} else {
 		opts = ""
 	}
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateFastqReport.py --libName ${libName} --libDir ${libJson} --libMetrics metrics $opts
+	generateFastqReport.py --libName ${libName} --libJsonName ${libJson} --libMetrics metrics --libraryStructPath ${libStructDir} $opts
 """
 }
 
@@ -430,7 +267,7 @@ publishDir "$params.outDir/reports", mode: 'copy'
 errorStrategy 'ignore'
 label 'report'
 script:
-	outFn = "allSamples.reportStatistics.tsv"
+	outFn = "allSamples.reportStatistics.csv"
 """
 	mergeReportStats.py $sampleStats > $outFn
 """
@@ -440,7 +277,10 @@ script:
 // Run the workflow for one or multiple samples
 // either from one runFolder or one / multiple sets of fastq files
 workflow {
-	// Inputs
+	// Call initialise function in Helper.groovy to pretty print important
+	// parameters along with some additional information about the pipeline
+	Helper.initialise(workflow, params, log)
+	
 	regularizeSamplesCsv(file(params.samples))
 	samplesCsv = regularizeSamplesCsv.out
 	samples = samplesCsv.splitCsv(header:true, strip:true)
@@ -451,31 +291,132 @@ workflow {
 
 	isBarnyard = genome.get('isBarnyard', false)
 	
-	inputReads(samples, samplesCsv, libJson)
+	// Call the inputReads workflow
+	inputReads(samples, samplesCsv, libJson, params.runFolder, params.fastqDir, params.fastqSamplesheet, params.trimFastq, params.fastqc, params.outDir, params.bclConvertParams, params.splitFastq, params.trimAdapt)
 	
+	// sampleDemuxMetrics -> (sample_name, library_name, demux_json for the library containing the sample)
 	sampleDemuxMetrics = inputReads.out.metrics.cross(samples.map{[it.libName,it.sample]}).map({[it[1][1], it[0][0], it[0][1]]})
+	sampleDemuxMetrics.dump(tag:'sampleDemuxMetrics')
 
-	starsolo(genome.star_index, libStructure,  inputReads.out.fqs)
+	// Sort the input fq files from inputReads to not break caching
+	// fqsSorted -> (sample_name.well_coordinate, transcript, barcode)
+	fqsSorted = inputReads.out.fqs.toSortedList().flatMap()
+	fqsSorted.dump(tag:'fqsSorted')
+	
+	if (params.splitFastq) {
+		// Group by sample_name.well_coordinate(first entry of fqSorted)
+		// alignFqGroupedBySampleAndWell -> (sample_name.well_coordinate, [transcript], [barcode])
+		alignFqGroupedBySampleAndWell = fqsSorted.groupTuple()
+
+		// alignFqJobGroups -> (sample_name, [[transcript]], [[barcode]])
+		alignFqJobGroups = alignFqGroupedBySampleAndWell.map {
+			// Get sample name from {sample_name.well_coordinate}
+			// Not including last element of tokenized because it will be the well coordinate
+			def tokenized = it[0].tokenize(".")
+			tokenized.removeLast()
+			// Get the actual sample name
+			def sample = tokenized.join(".")
+			def transcript = it[1]
+			def barcode = it[2]
+			tuple(sample, transcript, barcode)
+		}.groupTuple(size:params.starGroupSize, remainder:true)
+		
+		// Flatten list of list of transcripts and barcodes
+		// alignFqGroups -> (sample_name, [transcript], [barcode])
+		alignFqJobGroups = alignFqJobGroups.map {
+			def sample = it[0]
+			def transcript = it[1].flatten()
+			def barcode = it[2].flatten()
+			tuple(sample, transcript, barcode)
+		}
+	} else {
+		// Group by sample name
+		alignFqJobGroups = fqsSorted.groupTuple()
+	}
+
+	// Sort transcript and barcode files to ensure input to star is deterministic
+	alignFqJobGroups = alignFqJobGroups.map {
+		tuple(it[0], it[1].sort(), it[2].sort())
+	}
+	alignFqJobGroups = alignFqJobGroups.toSortedList().flatMap()	
+	
+	// Add counter to alignFqJobGroups to aid output naming when splitFastq is true
+	def count = 1
+	alignFqJobGroups = alignFqJobGroups.map{
+		tuple(it[0], count++, it[1], it[2])
+	}
+	alignFqJobGroups.dump(tag:'alignFqJobGroups')
+	
+	starsolo(genome.star_index, libStructure, alignFqJobGroups)
+	starsolo.out.solo.dump(tag:'solo')
+	
+	if (params.splitFastq) {
+		// Group on sample name to ensure star outputs of the same sample are grouped together
+		star_solo_by_sample = starsolo.out.solo.groupTuple()
+		star_solo_by_sample.dump(tag: 'star_solo_by_sample')
+		
+		// Merge star outputs
+		merge_star(star_solo_by_sample)
+		solo_out = merge_star.out.merge
+	} else {
+		solo_out = starsolo.out.solo
+	}
 
 	expectedCells = samples.map{[it.sample, toIntOr0(it.expectedCells)]}
-	stats =  sampleDemuxMetrics.join(starsolo.out.solo).join(expectedCells)
+
+	if (params.splitFastq) {
+		trimFqStatsBySample = inputReads.out.trimFqStats.map {
+			// Get sample name from {sample_name.well_coordinate}
+			// Not including last element of tokenized because it will be the well coordinate
+			def tokenized = it[0].tokenize(".")
+			tokenized.removeLast()
+			// Get the actual sample name
+			def sample = tokenized.join(".")
+			def file = it[1]
+			tuple(sample, file)
+		}.groupTuple()
+	}
+	else {
+		trimFqStatsBySample = inputReads.out.trimFqStats
+	}
 	
-	sampleMetricsGeneration(stats, samplesCsv, libJson, "${projectDir}/references", isBarnyard)
-	sampleMetricsBySample = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.sample_metrics_json_for_report)
-	sampleReportGeneration(sampleMetricsBySample, libJson, isBarnyard)
+	//trimFqStatsBySample -> (sample_name, cutadapt output files)
+	trimFqStatsBySample.dump(tag:'trimFqStatsBySample')
+	
+	// stats -> (sample_name, library_name, demux_json, star_output, expectedCells)
+	stats =  sampleDemuxMetrics.join(solo_out).join(expectedCells)
+	stats.dump(tag:'stats')
+
+	sampleMetricsGeneration(stats, samplesCsv, libJson.getName(), isBarnyard, libJson.getParent())
+	sampleMetricsBySample = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.sample_metrics_json_for_report).join(trimFqStatsBySample)
+	sampleReportGeneration(sampleMetricsBySample, libJson.getName(), isBarnyard, libJson.getParent())
+
+	sampleMetricsBySample = sampleMetricsBySample.map{
+		def sample = it[0]
+		def libName = it[1]
+		def allCells = it[2]
+		def metrics = it[3]
+		tuple(sample, libName, allCells, metrics)
+	}
 	
 	// Group by libName
 	metricsByLib = sampleMetricsBySample.groupTuple(by: 1)
-	fastqMetricsGeneration(metricsByLib, samplesCsv)
+	fastqMetricsGeneration(metricsByLib)
 	multiSampleReport(sampleReportGeneration.out.stats.collect())
 	
-	fastqReportGeneration(fastqMetricsGeneration.out, libJson, "${projectDir}/references")
-	cellTypingInput = stats.join(sampleMetricsGeneration.out.filtered_star_mtx)
+	fastqReportGeneration(fastqMetricsGeneration.out, libJson.getName(), libJson.getParent())
+	cellTypingInput = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.filtered_star_mtx)
+
 	if (params.cellTyping) {
 		cellTyping(cellTypingInput)
 	}
+
 }
+
+// Function that gets invoked when workflow completes
+// Publishes a file named workflow_info.json that contains information about the pipeline execution
 workflow.onComplete {
+	testing = false
 	def data = ["Workflow Information": ["Execution status": "${ workflow.success ? 'OK' : 'failed' }",
 								         "Pipeline completion timestamp": "$workflow.complete",
 								         "Git repo URL": "$workflow.repository",
@@ -485,12 +426,20 @@ workflow.onComplete {
 				         				 "Configuration profile": "$workflow.profile",
 						         		 "Start timestamp": "$workflow.start",
          								 "Stop timestamp": "$workflow.complete",
-									 "Run name": "$workflow.runName",
-		         						 "Duration": "$workflow.duration"]]
+										 "Run name": "$workflow.runName",
+										 "Revision": "$workflow.revision",
+										 "Commit ID": "$workflow.commitId",
+										 "Duration": "$workflow.duration"]]
 	def params_data = ["Parameters": [:]]
 	for (p in params) {
 		if (!p.key.contains('-')) {
 			params_data."Parameters".put("$p.key", "$p.value")
+		}
+		if (p.key.equals('testing_run')) {
+			testing = true
+			data."Workflow Information".put("Exit status", "$workflow.exitStatus")
+			data."Workflow Information".put("Error message", "$workflow.errorMessage")
+
 		}
         
     }
@@ -506,6 +455,7 @@ workflow.onComplete {
 			manifest_data."Manifest".put(split_str[0], split_str[1])
 		}
 	}
+
 	def json_str = JsonOutput.toJson(data+params_data+reference_data+manifest_data)
 	def json_beauty = JsonOutput.prettyPrint(json_str)
 	workflow_info = file("$params.outDir/workflow_info.json")

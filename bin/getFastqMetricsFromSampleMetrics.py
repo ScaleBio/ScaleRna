@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Python script to generate library metrics from sample metrics
+Generate library metrics from all sample metrics for a library
 """
 import argparse
 import pandas as pd
@@ -9,14 +9,12 @@ import shutil
 from pathlib import Path
 from utils.base_logger import logger
 
-def concat_sample_metrics(sample_metrics, samplesheet, libName):
+def concat_sample_metrics(sample_metrics, libName):
     """
-    Function to concatenate sample metrics of one library into
-    a single metrics file representing that library
+    Concatenate sample metrics of one library into single metrics file
 
     Args:
         sample_metrics (list): List of paths to sample metrics
-        samplesheet (str): Path to sample sheet
         libName (str): Library name
     """
     list_of_dfs = []
@@ -44,15 +42,9 @@ def concat_sample_metrics(sample_metrics, samplesheet, libName):
     frame.set_index("", inplace=True)
 
     # Metrics will be written to the library_metrics folder
-    metricsDir = Path(".", "library_metrics")
+    metricsDir = Path(".", f"library_{libName}_metrics")
 
-    # If "reports" directory exists log contents of reports directory
-    # and continue execution
-    try:
-        os.mkdir(metricsDir)
-    except OSError as error:
-        logger.error(error)
-        logger.debug(f"Directory reports exists with contents {os.listdir('reports')}")
+    metricsDir.mkdir()
 
     # Assumption: There will always be a sample_metrics1 folder
     # Demux jsons are same for the same library so copying from folder1
@@ -61,28 +53,21 @@ def concat_sample_metrics(sample_metrics, samplesheet, libName):
         shutil.copyfile(f"sample_metrics1/demuxJson.json", f"{metricsDir}/demuxJson.json")
     else:
         shutil.copyfile(f"sample_metrics/demuxJson.json", f"{metricsDir}/demuxJson.json")
+    
     logger.debug(f"Writing allCellsBetweenFiles to {str(metricsDir.resolve())}")
 
     frame.to_csv(f"{metricsDir}/allCellsBetweenFiles.csv")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate metrics for library report")
-    parser.add_argument(
-        "--sample_metrics", nargs='+', type=str,
-        help="Per sample metrics that need to be concatenated",
-        required=True)
-    parser.add_argument(
-        "--samplesheet", required=True,
-        help="Path to the samples.csv containing information about libName")
-    parser.add_argument(
-        "--libName", type=str,
-        help="libName specified in passed samplesheet for "
-        "which to generate a fastq report")
+    parser = argparse.ArgumentParser(description="Generate metrics for library report")
+    parser.add_argument("--sample_metrics", nargs='+', type=str, required=True,
+                        help="Per sample metrics that need to be concatenated")
+    parser.add_argument("--libName", type=str,
+                        help="libName specified in passed samplesheet for which to generate a fastq report")
     
     args = parser.parse_args()
 
-    concat_sample_metrics(args.sample_metrics, args.samplesheet, args.libName)
+    concat_sample_metrics(args.sample_metrics, args.libName)
 
 if __name__ == "__main__":
     main()

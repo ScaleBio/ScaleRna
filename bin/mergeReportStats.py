@@ -12,16 +12,16 @@ import pandas as pd
 
 def merge(sampleFns):
     """
-    Function to merge reportStatistics.tsv for all samples
+    Function to merge reportStatistics.csv for all samples
 
     Args:
-        sampleFns (list): List of all reportStatistics.tsv
+        sampleFns (list): List of all reportStatistics.csv
     """
     merged = {}
 
     for fn in sampleFns:
         tab = pd.read_csv(fn, names=["Category", "Metric", "Value"],
-                          header=None, sep="\t")
+                          header=None)
 
         if 'Category' not in merged:
             merged['Category'] = tab.Category[1:]
@@ -33,15 +33,15 @@ def merge(sampleFns):
         merged[name] = tab.Value[1:]
 
     merged = pd.DataFrame(merged)
-    merged.to_csv(sys.stdout, sep="\t", index=False, header=True)
+    merged.to_csv(sys.stdout, index=False, header=True)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Merge reportStatistics.tsv files "
+        description="Merge reportStatistics.csv files "
                     "for muiltiple samples into one")
     parser.add_argument("samples", nargs='+', type=str,
-                        help="reportStatistics.tsv for all samples")
+                        help="reportStatistics.csv for all samples")
     args = parser.parse_args()
 
     merge(args.samples)
