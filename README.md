@@ -27,7 +27,7 @@ The workflow produces per-sample and per-library QC reports (`html`), alignments
 
 ## Workflow Execution
 ### Workflow test
-A small test run, with all input data stored online, can be done with 
+A small test run, with all input data stored online or in this repository, can be run with the following command. Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a real assay: 
 
 `nextflow run /PATH/TO/ScaleRna -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --outDir output`
 
@@ -35,12 +35,12 @@ See [dependencies](docs/dependencies.md) for the best `PROFILE` to use on your s
 
 Note that this run will automatically download the example data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/PBMC/221104_NB551228_0182_AHCCFKBGXN 221104_NB551228_0182_AHCCFKBGXN
-aws s3 sync s3://scale.pub/testData/rna/grch38 grch38
+aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs
+aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome
 ```
 and then run with
 ```
-nextflow run /PATH/TO/ScaleRna/ -profile docker,singularity --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome grch38/grch38.json --runFolder 221104_NB551228_0182_AHCCFKBGXN --outDir /PATH/TO/OUTPUT_DIR
+nextflow run /PATH/TO/ScaleRna/ -profile docker,singularity --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
 ```
 
 ### Nextflow Command-line

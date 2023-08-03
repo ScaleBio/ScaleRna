@@ -4,9 +4,9 @@
 
 ##### Inputs
 ### Sequencing data input can be either a Illumina sequencer RunFolder (bcl)
-runFolder : s3://scale.pub/testData/rna/PBMC/221104_NB551228_0182_AHCCFKBGXN
+### runFolder : 
 ### or a directory with fastq files
-# fastqDir : "s3://scale.pub/testData/rna/PBMC/221104_AHCCFKBGXN.fastq/"
+fastqDir : "s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/"
 
 ### A file listing all samples in the analysis with their barcode sequences and sample settings
 samples : ${projectDir}/docs/examples/samples.csv
