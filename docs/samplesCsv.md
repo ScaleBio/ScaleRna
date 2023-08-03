@@ -9,10 +9,11 @@ The first column is required to be `sample` and contains the name of each sample
 :---- | ---- | :----:
 sample | Sample name | Foobar-2
 barcodes | RT-plate wells used for this sample | 1A-2H
-libName | Name for the sequencing library / fastq files (optional)| ScaleRna
+libName | Name for the overall sequencing library / fastq files (optional)| ScaleRna
 expectedCells | Approximate number of single cells in this sample (optional) | 50000
 
 * `sample` and `libName` should consist only of letters, numbers, dash (`-`) and dot (`.`)
+* A single `libName` should be used for an entire ScaleRNA sequencing library, not one `libName` per sample loaded into the RT plate.
 * When running from pre-existing fastq file input, `libName` should match the first part of the fastq file name for this sample, e.g.: `Foo1` for `Foo1_*.fastq.gz`.
 * `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution.
 

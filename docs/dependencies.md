@@ -19,6 +19,8 @@ Another option is using the [Conda](https://docs.conda.io/en/latest) package man
 - Install [ScaleBio Tools](scaleBioTools.md)
     - `/PATH/TO/ScaleRNA/envs/download-scale-tools.sh`
 - If running from a sequencer runFolder (.bcls) Illumina [BCL Convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) is required to be installed (and available on `$PATH`)
+- If nextflow throws an error installing packages while using `-profile conda`, there is a more verbose yaml file with a comprehensive list of all python packages and their versions, specified in [envs](../envs)([scaleRna_verbose.conda.yml](../envs/scaleRna_verbose.conda.yml) and [scalereport_verbose.conda.yml](../envs/scalereport_verbose.conda.yml))
+    - To run nextflow with these conda files, edit the [nextflow.config](../nextflow.config) and replace the process.conda section of the conda profile with the appropriate yml. So `process.conda = "$projectDir/envs/scaleRna.conda.yml"` becomes `process.conda = "$projectDir/envs/scaleRna_verbose.conda.yml` and `conda = "$projectDir/envs/scalereport.conda.yml"` becomes `conda = "$projectDir/envs/scalereport_verbose.conda.yml"`
 
 See the [Nextflow documentation](https://www.nextflow.io/docs/latest/conda.html) for additional detail of conda support in Nextflow.
 

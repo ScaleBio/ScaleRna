@@ -1,4 +1,8 @@
 # Version 1.3
+## 1.3.3
+* Updated bcl-convert dependency to version 3.9.3
+* New tiny pipeline test dataset
+## 1.3.2
 * Output gene expression matrix (mtx) from STAR with resolved multimappers included
 	- See `--starMulti` option in `nextflow.config`
 * Added trimmed reads metric to sample QC report
@@ -6,6 +10,7 @@
 * Switch metric file outputs to `.csv`
 * Option for increased parallelization with `--splitFastq`
 * New platemap color scheme
+
 # Version 1.2
 * Enable Poly-T trimming
 	- Reads are now trimmed at Poly-T, in addition to Poly-A stretches, to remove a few antisense mismapping artifacts
