@@ -208,6 +208,7 @@ def countTranscripts(sampleSpecificFilePaths, cellBarcodes, detectedGenes, isBar
             
         for line in matrixFile:
             split_line = line.split()
+            # Individual expression counts can be fractions, due to multimapper resolution
             gene, cell, count = int(split_line[0]), int(split_line[1]), float(split_line[2])
             cid = cell-1
                 
@@ -233,7 +234,9 @@ def countTranscripts(sampleSpecificFilePaths, cellBarcodes, detectedGenes, isBar
             else:
                 cells[cid].genes += 1
                 cells[cid].umis += count
-        
+    # For consistency with STAR CellReadMetrics output, we round the total expression (UMI) count
+    for cell in cells:
+        cell.umis = round(cell.umis)
     allCells = pd.DataFrame(cells, index=cellBarcodes.Barcode)
     return allCells
 
