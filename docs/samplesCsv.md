@@ -8,8 +8,8 @@ The first column is required to be `sample` and contains the name of each sample
  Column | Description | Example
 :---- | ---- | :----:
 sample | Sample name | Foobar-2
-barcodes | RT-plate wells used for this sample | 1A-2H
-libName | Name for the overall sequencing library / fastq files (optional)| ScaleRna
+barcodes | RT-plate wells used for this sample (optional) | 1A-2H
+libName | Name for the overall sequencing library / fastq files (optional) | ScaleRna
 expectedCells | Approximate number of single cells in this sample (optional) | 50000
 
 * `sample` and `libName` should consist only of letters, numbers, dash (`-`) and dot (`.`)

@@ -85,10 +85,11 @@ publishDir "${outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
 
 
 script:
-	pthreads = ((task.cpus)/3 - 0.5).round()
+	wthreads = (task.cpus/2 - 0.5).round()
+	dthreads = (task.cpus/3 - 0.5).round()
 """
 	bcl-convert --sample-sheet $samplesheet --bcl-input-directory $run \
-    --bcl-num-conversion-threads $pthreads --bcl-num-compression-threads $pthreads --bcl-num-decompression-threads $pthreads \
+    --bcl-num-conversion-threads $wthreads --bcl-num-compression-threads $wthreads --bcl-num-decompression-threads $dthreads \
     $bclConvertParams --output-directory fastq
 """
 }
@@ -102,7 +103,7 @@ output:
 	tuple(val(name), path("trimmed/${transName}"), path("trimmed/${bcName}"), emit: fastq)
 	tuple(val(name), path("*.trim_stats.json"), emit: stats)
 	path("*.trim_stats"), emit: stats_for_multiqc
-tag "$name"
+tag "$name $count"
 
 script:
 	transName = transFastq.getName()
@@ -124,7 +125,7 @@ output:
 	path("fastqc/*.zip"), emit: zip
 publishDir "${outDir}/fastq/", mode: 'copy'
 label 'small'
-tag "${getReadFromFqname(fq)}"
+tag "${fq.getSimpleName()}"
 """
 	mkdir fastqc
 	fastqc -o fastqc $fq
@@ -139,7 +140,7 @@ input:
 output:
 	path("multiqc_report.html")
 publishDir "${outDir}/reports", mode: 'copy'
-errorStrategy 'ignore'
+label 'optional'
 """
 	multiqc .
 """
@@ -167,7 +168,7 @@ output:
 	tuple(val(libName), path("$outDir/metrics.json"), emit: metrics)
 publishDir "${outputDir}/${dir_name}", pattern: "$outDir/*gz", enabled: params.fastqOut
 publishDir "${outputDir}/${dir_name}", mode: 'copy', pattern: "$outDir/*{txt,tsv,json}"
-tag "$libName"
+tag "$libName $count"
 
 script:
 	outDir = "${libName}.demux"
@@ -190,6 +191,7 @@ input:
 output:
     tuple(val(libName), path("metrics.json"))
     publishDir "${outDir}/barcodes", mode:'copy'
+tag "$libName"
 script:
     """
     mergeBCparserOutput.py --bc_jsons demux_metrics* --lib_json ${libJson}
@@ -269,27 +271,30 @@ main:
 	// fqSamples -> (library name, matching key, [I1, R1, R2], counter) 
 	fqSamples.dump(tag:'fqSamples')
 	
-	checkFastq = samples.map({it.libName}).unique().join(fqSamples, remainder: true)
+	// Check that for each library (unique libName in samples.csv), we have a complete set of fastq files
+	// checkFastq -> (libName, sampleName, matchingKey, Fastqs, counter)
+	// This slightly strange channel construction (including it.sample) works around the lack of 'left-join'
+        // in nextflow (this way we can distinguish 'left-only' and 'right-only' join results)
+	checkFastq = samples.map{[it.libName, it.sample]}.unique({it[0]}).join(fqSamples, remainder: true)
 	checkFastq.dump(tag:'checkFastq')
-
-	
-	checkFastq = checkFastq.map{
+	checkFastq.map {
 		// If samples.csv has a library name which does not have corresponding fastq files
-		// then third element of checkFastq will be null
-		if(it[2] == null) {
+		// then 4th element of checkFastq will be null
+		if (it[3] == null) {
 			throwError("Library ${it[0]} does not have matching fastq files. None of the provided fastq filenames start with ${it[0]}")
 		}
 		// Check that each library has index1, read1 and read2 fastq files
-		if(it[2].any { it.getName().contains("_R1_") } == false && it[2].any { it.getName().contains("_R1.") } == false) {
+		if (it[3].any {fq -> fq.getName().contains("_R1_") or fq.getName().contains("_R1.")} == false) {
 			throwError("Library ${it[0]} does not have read1 fastq file")
 		}
-		if(it[2].any { it.getName().contains("_R2_") } == false && it[2].any { it.getName().contains("_R2.") } == false) {
+
+		if (it[3].any {fq -> fq.getName().contains("_R2_") or fq.getName().contains("_R2.")} == false) {
 			throwError("Library ${it[0]} does not have read2 fastq file")
 		}
-		if(it[2].any { it.getName().contains("_I1_") } == false && it[2].any { it.getName().contains("_I1.") } == false) {
-			throwError("Library ${it[0]} does not have index1 fastq file")
+
+		if (it[3].any {fq -> fq.getName().contains("_I1_") or fq.getName().contains("_I1.")} == false) {
+			throwError("Library ${it[0]} does not have index fastq file")
 		}
-		tuple(it[0], it[1], it[2], it[3])
 	}
 
 	// Process cell-barcodes and (optionally) split fastqs into samples based on tagmentation barcode
@@ -310,18 +315,18 @@ main:
 	// Indicates splitFastq is False, or splitFastq is True and we're starting the workflow from
 	// fastq files. In that case we split in bcParser and the well coordinate is already attached
 	else {
-	// Each barcodeParser run outputs fastqs for each sample in one list
-	// readFqs -> ([[sample_name]], fastq_matching_key, file)
-	readFqs = barcodeParser.out.readFq.transpose().map{
-		constructSampleName(it)
-	}.groupTuple(by:[0,1], size:2) // We still get R1 and R2, even if only R2 will be used downstream
-	readFqs.dump(tag:'readFqs')
-	
-	// Same as above but for the barcode reads (_BC_)
-	// No group tuple because only one barcode read file is produced per sample
-	bcFqs = barcodeParser.out.bcFq.transpose().map{
-		constructSampleName(it)
-	}
+		// Each barcodeParser run outputs fastqs for each sample in one list
+		// readFqs -> ([[sample_name]], fastq_matching_key, file)
+		readFqs = barcodeParser.out.readFq.transpose().map{
+			constructSampleName(it)
+		}.groupTuple(by:[0,1], size:2) // We still get R1 and R2, even if only R2 will be used downstream
+		readFqs.dump(tag:'readFqs')
+		
+		// Same as above but for the barcode reads (_BC_)
+		// No group tuple because only one barcode read file is produced per sample
+		bcFqs = barcodeParser.out.bcFq.transpose().map{
+			constructSampleName(it)
+		}
 	}
 	bcFqs.dump(tag:'bcFqs')
 	// Combine Read2 and barcode read for each sample / sample x RT combination
@@ -349,6 +354,7 @@ main:
 	if (fastqc) {
 		// Exclude I1 and I2 from fastqc
 		mainReads = fqSamples.flatMap{it.get(2)}.filter{getReadFromFqname(it.getName())[0] == 'R'}
+		channel.dump(tag:'fastqc')
 		fastqc(mainReads, outDir)
 		reports = fastqc.out.zip
 		if (runDir != null) {

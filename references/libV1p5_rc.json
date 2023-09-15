@@ -6,14 +6,15 @@
     {"read": "read1", "start": 0, "length": 9, "name": "lig", "sequences": "3lvlRNA_lig.txt", "level":2, "alias":"Ligation"},
     {"read": "read1", "anchor": "splint", "offset": 15, "length": 10, "name": "rt", "sequences": "3lvlRNA_rt.txt", "level":1, "alias":"RT"},
     {"read": "read1", "anchor": "splint", "offset": 7, "length": 8, "name": "umi", "type": "umi"},
-    {"read": "index1", "start": 0, "length": 10, "name": "pcr", "sequences": "3lvlRNA_pcr.txt", "level":3, "alias":"i7"}
+    {"read": "index2", "start": 0, "length": 10, "name": "pcr", "sequences": "3lvlRNA_pcr.txt", "level":3, "alias":"i5", "rev_comp": true}
 ],
 "sample_barcode": "rt",
 "genomic_r2": {"start":0, "length": 48},
 "star_barcode_param": "--soloType CB_UMI_Simple --soloCBlen 29 --soloUMIstart 30 --soloUMIlen 8 --soloCBwhitelist None",
 "bcl_convert": {
-    "library_barcodes": {},
-    "split_on": "index1",
-    "index1Seqs": "3lvlRNA_pcr.txt"
+    "library_barcodes": "3lvlRNA_p7Pools.txt",
+    "index2Seqs": "3lvlRNA_pcr.txt",
+    "index2RevComp": true,
+    "split_on": "index2"
 }
 }

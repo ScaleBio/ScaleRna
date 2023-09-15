@@ -31,7 +31,6 @@ def merge_matrix_and_barcode(star_dirs, star_feature, star_matrix, sample_name):
     if len(combined_list_of_barcodes) != len(set(combined_list_of_barcodes)):
         raise ValueError("Same cell in multiple star output files")
 
-    barcode_row_number = 0
     line_count = 0
 
     # Open temp matrix for writing combined matrices
@@ -50,17 +49,15 @@ def merge_matrix_and_barcode(star_dirs, star_feature, star_matrix, sample_name):
                 barcode_sequence = list_of_barcodes[idx][barcode-1]
                 new_barcode = combined_dict_of_barcodes[barcode_sequence]+1
                 
-                barcode_row_number += 1
                 line_count += 1
 
                 f_tmp_mtx.write(f"{feature} {new_barcode} {umi}\n")
 
     # Write header information to final merged matrix
     feature_count = len(pd.read_csv(f"{star_dirs[0]}/{star_feature}/raw/features.tsv", sep="\t", header=None).index)
-    barcode_count = barcode_row_number
     with open(f"{sample_name}.star.solo/{star_feature}/raw/{star_matrix}", "w") as f_merged_mtx:
         f_merged_mtx.write(f"{header}\n%\n")
-        f_merged_mtx.write(f"{feature_count} {barcode_count} {line_count}\n")
+        f_merged_mtx.write(f"{feature_count} {len(combined_list_of_barcodes)} {line_count}\n")
     
     # Append contents of temp matrix to final merged matrix
     os.system(f"cat {tmp_matrix_fn} >> {sample_name}.star.solo/{star_feature}/raw/{star_matrix}")
@@ -134,7 +131,7 @@ def main():
     parser.add_argument("--star_feature", type=str)
     parser.add_argument("--sample_name", type=str)
     args = parser.parse_args()
-
+    args.star_dirs.sort()
     merged_star_path = Path(f"{args.sample_name}.star.solo/{args.star_feature}/raw")
     merged_star_path.mkdir(parents=True, exist_ok=True)
     

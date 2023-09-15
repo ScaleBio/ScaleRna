@@ -1,6 +1,6 @@
-# ScaleBio scRNA Workflow
+# ScaleBio Seq Suite: RNA Workflow
 
-This is a Nextflow workflow to run analysis of ScaleBio single-cell RNA sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-count matrix, etc.), and QC reports.
+This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-count matrix, etc.), and QC reports.
 
 ## Getting started
 * First install [Nextflow](http://www.nextflow.io) (22.04 or later)
@@ -35,8 +35,8 @@ See [dependencies](docs/dependencies.md) for the best `PROFILE` to use on your s
 
 Note that this run will automatically download the example data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs
-aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome
+aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome --no-sign-request
 ```
 and then run with
 ```

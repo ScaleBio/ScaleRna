@@ -3,7 +3,7 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
-include { inputReads } from './inputReads'
+include { inputReads } from './modules/inputReads'
 
 // Load .json file into object
 // (reference genomes, library design, etc.)
@@ -152,13 +152,12 @@ script:
 // Generate metrics per sample from STARsolo output
 process sampleMetricsGeneration {
 input:
-	tuple(val(sample), val(libName), path("demuxMetrics.json"), path("Solo.out"), val(expectedCells))
+	tuple(val(sample), val(libName), path("Solo.out"), val(expectedCells))
 	path(samplesCsv)
 	val(libStructName)
 	val(isBarnyard)
 	path(libStructDir)
 output:
-	tuple(val(sample), path("${sample}_metrics/sample_metrics"), emit: sample_metrics_json_for_report)
 	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), emit: cell_metrics)
 	tuple(val(sample), path("${sample}_filtered_star_output"), emit: filtered_star_mtx)
 	
@@ -168,20 +167,18 @@ publishDir "$params.outDir/samples", pattern:"*/allCells.csv", saveAs:{"${sample
 label 'report'
 tag "$sample"
 script:
+	opts = ""
 	if (isBarnyard) {
-		opts = "--isBarnyard"
-	} else {
-		opts = ""
+		opts = opts + "--isBarnyard "
 	}
-	if (params.useSTARthreshold) {
-		opts = opts + " --useSTARthreshold"
+	if (!params.useSTARthreshold) {
+		opts = opts + "--calcCellThreshold "
 	}
-
+	libStruct = "${libStructDir}/${libStructName}"
 """
-	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libJsonName ${libStructName} \
-	--topCellPercent ${params.topCellPercentage} --libraryStructPath ${libStructDir}\
-	--minCellRatio ${params.minCellRatio} --minReads ${params.minReads} --star_out Solo.out \
-	--starFeature ${params.starFeature} --starMatrix ${starMatrixFn(params.starMulti)} \
+	getSampleMetrics.py --sample ${sample} --samplesheet ${samplesCsv} --libStruct ${libStruct} \
+	--topCellPercent ${params.topCellPercentage} --minCellRatio ${params.minCellRatio} --minReads ${params.minReads} \
+    --star_out Solo.out --starFeature ${params.starFeature} --starMatrix ${starMatrixFn(params.starMulti)} \
 	$opts
 """
 }
@@ -189,8 +186,8 @@ script:
 // Generate report for each sample from metrics generated in sampleMetricsGeneration process
 process sampleReportGeneration {
 input:
-	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), path("${sample}_metrics/sample_metrics"), path("trim_stats*.json"))
-	val(libJson)
+	tuple(val(sample), val(libName), path("${sample}_metrics/allCells.csv"), path("trim_stats*.json"))
+	val(libStructName)
 	val(isBarnyard)
 	path(libStructDir)
 output:
@@ -200,31 +197,30 @@ output:
 	path("reports/csv/${sample}_unique_transcript_counts_by_RT_Index_well.csv")
 	path("reports/csv/${sample}_num_cells_by_RT_Index_well.csv")
 publishDir "$params.outDir", mode: 'copy'
-errorStrategy 'ignore'
 label 'report'
+label 'optional'
 tag "$sample"
 script:
+	opts = ""
 	if (isBarnyard) {
-                opts = "--isBarnyard "
-    } else {
-                opts = ""
+		opts = opts + "--isBarnyard "
     }
 	if (params.internalReport) {
 		opts = opts + "--internalReport "
 	}
+	libStruct = "${libStructDir}/${libStructName}"
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateSampleReport.py --sampleName ${sample} --libJsonName ${libJson} --libraryStructPath ${libStructDir} --sample_metrics ${sample}_metrics --trim_stats trim_stats* $opts
+	generateSampleReport.py --sampleName ${sample} --libraryStruct $libStruct --sample_metrics ${sample}_metrics --trim_stats trim_stats* $opts
 """
 }
 
 // Generate metrics for each library from the metrics of all samples in the library
 process fastqMetricsGeneration {
 input:
-	tuple(val(sample), val(libName), path("allCells*.csv"), path("sample_metrics"))
+	tuple(val(libName), val(samples), path("allCells*.csv"))
 output:
 	tuple(val(libName), path("library_${libName}_metrics"))
-errorStrategy 'ignore'
 label 'report'
 tag "$libName"
 script:
@@ -236,14 +232,15 @@ script:
 // Generate report for each library from metrics generated in fastqMetricsGeneration
 process fastqReportGeneration {
 input:
-	tuple(val(libName), path("metrics"))
-	val(libJson)
+	tuple(val(libName), path(demuxJson), path("metrics"))
+	val(libJsonFn)
 	path(libStructDir)
 output:
 	path("reports/library_${libName}.report.html")
 	path("reports/csv/library_${libName}*.csv")
 publishDir "$params.outDir", mode: 'copy'
 label 'report'
+label 'optional'
 tag "$libName"
 script:
 	if (params.internalReport) {
@@ -251,9 +248,10 @@ script:
 	} else {
 		opts = ""
 	}
+	libJson = "${libStructDir}/${libJsonFn}"
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateFastqReport.py --libName ${libName} --libJsonName ${libJson} --libMetrics metrics --libraryStructPath ${libStructDir} $opts
+	generateFastqReport.py --libName $libName --demuxMetrics $demuxJson --libStruct $libJson --libMetrics metrics $opts
 """
 }
 
@@ -264,8 +262,8 @@ input:
 output:
 	path(outFn)
 publishDir "$params.outDir/reports", mode: 'copy'
-errorStrategy 'ignore'
 label 'report'
+label 'optional'
 script:
 	outFn = "allSamples.reportStatistics.csv"
 """
@@ -294,9 +292,6 @@ workflow {
 	// Call the inputReads workflow
 	inputReads(samples, samplesCsv, libJson, params.runFolder, params.fastqDir, params.fastqSamplesheet, params.trimFastq, params.fastqc, params.outDir, params.bclConvertParams, params.splitFastq, params.trimAdapt)
 	
-	// sampleDemuxMetrics -> (sample_name, library_name, demux_json for the library containing the sample)
-	sampleDemuxMetrics = inputReads.out.metrics.cross(samples.map{[it.libName,it.sample]}).map({[it[1][1], it[0][0], it[0][1]]})
-	sampleDemuxMetrics.dump(tag:'sampleDemuxMetrics')
 
 	// Sort the input fq files from inputReads to not break caching
 	// fqsSorted -> (sample_name.well_coordinate, transcript, barcode)
@@ -383,28 +378,27 @@ workflow {
 	//trimFqStatsBySample -> (sample_name, cutadapt output files)
 	trimFqStatsBySample.dump(tag:'trimFqStatsBySample')
 	
-	// stats -> (sample_name, library_name, demux_json, star_output, expectedCells)
-	stats =  sampleDemuxMetrics.join(solo_out).join(expectedCells)
-	stats.dump(tag:'stats')
-
-	sampleMetricsGeneration(stats, samplesCsv, libJson.getName(), isBarnyard, libJson.getParent())
-	sampleMetricsBySample = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.sample_metrics_json_for_report).join(trimFqStatsBySample)
+	// sampleStatsInput -> (sample_name, library_name, star_output, expectedCells)
+	sampleStatsInput = samples.map{[it.sample,it.libName]}.join(solo_out).join(expectedCells)
+	sampleStatsInput.dump(tag:'sampleStatsInput')
+	sampleMetricsGeneration(sampleStatsInput, samplesCsv, libJson.getName(), isBarnyard, libJson.getParent())
+	sampleMetricsBySample = sampleMetricsGeneration.out.cell_metrics.join(trimFqStatsBySample)
 	sampleReportGeneration(sampleMetricsBySample, libJson.getName(), isBarnyard, libJson.getParent())
 
-	sampleMetricsBySample = sampleMetricsBySample.map{
+	// Metrics per library
+	// (libName, [sample0, sample, ...], [allCells0, allCells1, ...])
+	metricsByLib = sampleMetricsBySample.map{
 		def sample = it[0]
 		def libName = it[1]
 		def allCells = it[2]
-		def metrics = it[3]
-		tuple(sample, libName, allCells, metrics)
-	}
-	
-	// Group by libName
-	metricsByLib = sampleMetricsBySample.groupTuple(by: 1)
+		tuple(libName, sample, allCells)
+	}.groupTuple()
+	metricsByLib.dump(tag:'metricsByLib')
 	fastqMetricsGeneration(metricsByLib)
 	multiSampleReport(sampleReportGeneration.out.stats.collect())
 	
-	fastqReportGeneration(fastqMetricsGeneration.out, libJson.getName(), libJson.getParent())
+	fastqReportMetrics = inputReads.out.metrics.join(fastqMetricsGeneration.out)
+	fastqReportGeneration(fastqReportMetrics, libJson.getName(), libJson.getParent())
 	cellTypingInput = sampleMetricsGeneration.out.cell_metrics.join(sampleMetricsGeneration.out.filtered_star_mtx)
 
 	if (params.cellTyping) {

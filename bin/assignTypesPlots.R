@@ -165,7 +165,11 @@ seuratPlotRTBarcode <- function(seuratObj, projName){
 
 heatmapQC <- function(seuratObj, projName){
   
-  bcVec <- c("RT", "PCR", "Ligation")
+  #This is a vector containing possible barcode IDs. 
+  #We determine which of the barcode IDs are in the column names of the allCells data/seurat meta data.
+  #After identifying which barcode IDs are present in the column names. Subset vector to include only barcode IDs which are in the column names.
+  bcVec <- c("RT", "PCR", "Ligation", "I5", "I7")
+  bcVec <- bcVec[which(bcVec %in% colnames(seuratObj@meta.data))]
   
   metricVec <- c("reads", "exonReads", "passingReads", "mitoReads", "genes", "mappedReads", "intronReads", "uniquePassingReads", "umis", "geneReads", "antisenseReads", "Saturation")
   
@@ -192,8 +196,12 @@ heatmapQC <- function(seuratObj, projName){
 barcodeStackedBar <- function(seuratObj, projName){
   
   group <- "seurat_clusters"
-  
-  bcVec <- c("RT", "PCR", "Ligation")
+
+    #This is a vector containing possible barcode IDs. 
+  #We determine which of the barcode IDs are in the column names of the allCells data/seurat meta data.
+  #After identifying which barcode IDs are present in the column names. Subset vector to include only barcode IDs which are in the column names.
+  bcVec <- c("RT", "PCR", "Ligation", "I5", "I7")
+  bcVec <- bcVec[which(bcVec %in% colnames(seuratObj))]
   
   for(bc in bcVec){
     
@@ -232,8 +240,12 @@ seuratPlotMappingMetricsViolin <- function(seuratObj, projName){
 }
 
 seuratPlotBarcodeUMAP <- function(seuratObj, projName){
- 
-  bcVec <- c("RT", "PCR", "Ligation")
+
+  #This is a vector containing possible barcode IDs. 
+  #We determine which of the barcode IDs are in the column names of the allCells data/seurat meta data.
+  #After identifying which barcode IDs are present in the column names. Subset vector to include only barcode IDs which are in the column names.
+  bcVec <- c("RT", "PCR", "Ligation", "I5", "I7")
+  bcVec <- bcVec[which(bcVec %in% colnames(seuratObj@meta.data))]
   
   for(bc in bcVec){
     
@@ -374,6 +386,12 @@ if(params$plotOrigSample){
 
 #Checks if mapping metric qc plots should be generated.
 if(params$qcPlots){
+
+  #This is a vector containing possible barcode IDs. 
+  #We determine which of the barcode IDs are in the column names of the allCells data/seurat meta data.
+  #After identifying which barcode IDs are present in the column names. Use that barcode ID to create output directories.
+  bcVec <- c("PCR", "I5", "I7")
+  bcVec <- bcVec[which(bcVec %in% colnames(seurat@meta.data))]
   
   if(!dir.exists(paste0(params$projectName, "/qcPlots"))){
     dir.create(path = paste0(params$projectName, "/qcPlots"))
@@ -383,8 +401,8 @@ if(params$qcPlots){
     dir.create(path = paste0(params$projectName, "/qcPlots/Ligation")) 
   }
 
-  if(!dir.exists(paste0(params$projectName, "/qcPlots/PCR"))){
-    dir.create(path = paste0(params$projectName, "/qcPlots/PCR"))
+  if(!dir.exists(paste0(params$projectName, "/qcPlots/", bcVec))){
+    dir.create(path = paste0(params$projectName, "/qcPlots/", bcVec))
   }
 
   if(!dir.exists(paste0(params$projectName, "/qcPlots/RT"))){

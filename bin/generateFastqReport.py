@@ -7,114 +7,104 @@ import functools
 import json
 from pathlib import Path
 from typing import Dict
-import pandas as pd
+
 import datapane as dp
+import pandas as pd
 import plotly.express as px
-import utils.myconstants as constants
+
+from utils import fileUtils, reportUtil, statsUtils
 from utils.base_logger import logger
-from utils.ReportUtil import (GeneralUtils, CalculationUtils, DatapaneUtils)
 
+BARCODE_SHORTHAND_TO_NAME = {
+    'drop': 'Droplet Barcodes', 'P7': 'P7 Barcodes',
+    'lig': 'Ligation Barcodes', 'rt': 'Reverse Transcription Barcodes',
+    'umi': 'UMI'}
 
-def buildFastqReport(libName, libDir, libMetrics, internalReport, referencesPath):
+def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool):
     """
     Build the library report by calling relevant functions
 
     Args:
-        libName (str): Library name
-        libDir (str): Path to library json
-        libMetrics (str): Path to library metrics
-        internalReport (bool): Flag denoting whether report is for internal purposes'
-        referencesPath (Path): Reference files
+        libName: Library name
+        libJson: Library structure json
+        libMetrics: Path to library metrics
+        internalReport: Flag denoting whether report is for internal purposes'
     """
-    # Read in main metrics file using which we will build the report
-    allCellsBetweenFiles = pd.read_csv(f"{libMetrics}/allCellsBetweenFiles.csv", index_col=0)
-
-    # Read in demux metrics
-    with open(f"{libMetrics}/demuxJson.json") as f:
-        demuxJson = json.load(f)
-
-    # Read in library json
-    with open(referencesPath / libDir) as f:
-        libJson = json.load(f)
+    allCellsBetweenFiles = pd.read_csv(libMetrics / "allCellsBetweenFiles.csv", index_col=0)
+    demuxMetrics = json.load(open(demuxJson))
+    libStruct = json.load(open(libJson))
     
     # Reports will be written to the reports folder
     writeDir = Path(".", "reports")
-    Path(writeDir, "csv").mkdir(parents=True)
+    Path(writeDir, "csv").mkdir(parents=True, exist_ok=True)
 
     # Call function that builds a datapane page that depicts a cellBarcodes vs umi
     # figure, a table with barcode read status and a reads per sample figure;
     # creates a dataframe that has the number of reads that passed and the number
     # of reads that have different errors;
     # creates a matplotlib plate plot for reads per rt well
-    (overallPassingStats, readsPage, barcodeReadStatsInternal) = buildReadsPage(demuxJson, allCellsBetweenFiles, libName)
+    (overallPassingStats, readsPage, barcodeReadStatsInternal) = buildReadsPage(demuxMetrics, allCellsBetweenFiles, libName)
 
     # Call function that builds a datapane page that depicts a table with barcode
     # related information and plate plots that show reads per rt well, reads per
     # pcr well and reads per ligation well and also creates a dataframe with
     # information related to each barcoding level
-    (barcodeStatsDf, cellsPage, barcodeTypeStats) = buildBarcodesPage(demuxJson, libName, libJson, allCellsBetweenFiles,
-                                                                      writeDir, referencesPath)
+    (barcodeStatsDf, cellsPage, barcodeTypeStats) = buildBarcodesPage(demuxMetrics, libName, libJson, allCellsBetweenFiles, writeDir)
 
+    pages = [readsPage, cellsPage]
     if internalReport:
-        pages = [readsPage, cellsPage, dp.Page(blocks=[dp.Group(barcodeReadStatsInternal, barcodeTypeStats)], title='InternalReport')]
-    else:
-        # Concat two datapane pages
-        pages = [readsPage, cellsPage]
-
+        pages.append(dp.Page(blocks=[dp.Group(barcodeReadStatsInternal, barcodeTypeStats)], title='InternalReport'))
     # Build a report object from the concatenated pages
     report = dp.Report(blocks=pages)
 
     
     prefix = f"library_{libName}"
-
     # Write to log file absolute path of reports directory
     logger.debug(f"Writing {prefix}.typeLevelMatches.csv and {prefix}.overallMatches.csv, "
                  f"to {str(writeDir.resolve())}")
-
     # Write information related to each barcoding level to a csv file
     barcodeStatsDf.to_csv(writeDir / "csv" / f"{prefix}.typeLevelMatches.csv", index=False)
-
     # Write dataframe that has the number of reads that passed and the number
     # of reads that have different errors
     overallPassingStats.to_csv(writeDir / "csv" / f"{prefix}.overallMatches.csv", index=False)
 
     report.save(writeDir / f"{prefix}.report.html")
 
-def buildDfForPlatePlot(referencesPath, allCellsBetweenFiles, libJson, alias):
+def buildDfForPlatePlot(allCellsBetweenFiles:pd.DataFrame, libJson:Path, bcName:str):
     """
     Construct dataframe that will be used for plotting heatmap
 
     Args:
-        referencesPath (Path): Reference files
-        allCellsBetweenFiles (pd.DataFrame): All cells information for this library
-        libJson (dict): Library json information
-        alias (str): Alias string corresponding to barcoding level in library json
+        allCellsBetweenFiles: All cells information for this library
+        libJson: Library structure information
+        bcName: name of the barcode in lib.json
 
     Returns:
         Constructed dataframe
     """
-    wells = {}
+    libStruct = json.load(open(libJson))
+    libStructDir = libJson.parent # Directory containing libStruct.json and associated sequence files
 
-    for entry in libJson["barcodes"]:
-        if "alias" in entry:
-            if entry["alias"] == alias:
-                lib_json_dict_entry = entry
+    for bc in libStruct["barcodes"]:
+        if bc["name"] == bcName:
+            bcInfo = bc
+            break
+    else:
+        raise ValueError(f"Unknown barcode {bcName}")
     
-    with open(referencesPath / f'{lib_json_dict_entry["sequences"]}') as f:
+    wells = {}
+    with open(libStructDir / f'{bcInfo["sequences"]}') as f:
         for line in f:
             line = line.strip()
             split_line = line.split("\t")
             wells[split_line[0]] = split_line[1]
 
+    alias = bcInfo.get('alias') or bcInfo['name']
     barcode_list = allCellsBetweenFiles[alias].to_list()
-
     well_list = [wells[x] for x in barcode_list]
-
-    max_letter, max_number = DatapaneUtils.getMaxWellNumberAndLetter(referencesPath / f'{lib_json_dict_entry["sequences"]}')
-
+    max_letter, max_number = reportUtil.getMaxWellNumberAndLetter(libStructDir / f'{bcInfo["sequences"]}')
     allCellsBetweenFiles[f'{alias.lower()}_well'] = well_list
-
-    well_df = pd.DataFrame(0, columns=range(1, max_number+1), index=DatapaneUtils.getCharacterIndices(65,ord(max_letter)+1))
+    well_df = pd.DataFrame(0, columns=range(1, max_number+1), index=reportUtil.getCharacterIndices(65, ord(max_letter)+1))
     
     for well in set(well_list):
         letter = well[-1]
@@ -124,7 +114,7 @@ def buildDfForPlatePlot(referencesPath, allCellsBetweenFiles, libJson, alias):
     
     return well_df
 
-def buildBarcodesPage(demuxJson, libName, libJson, allCellsBetweenFiles, writeDir, referencesPath):
+def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, allCellsBetweenFiles:pd.DataFrame, writeDir:Path):
     """
     Function that builds a datapane page that depicts a table with barcode
     related information and plate plots that show reads per rt well, reads per
@@ -132,33 +122,32 @@ def buildBarcodesPage(demuxJson, libName, libJson, allCellsBetweenFiles, writeDi
     information related to each barcoding level
     
     Args:
-        demuxJson (dict): Dictionary with the demuxed metrics
-        libName (str): Library name
-        libJson (dict): Dictionary with library information obtained from the library json
-        allCellsBetweenFiles (pd.DataFrame): All cell information for this library
-        writeDir (Path): Write directory
-        referencesPath (Path): Reference files
+        demuxJson: Dictionary with the demuxed metrics
+        libName: Library name
+        libJson: Library Structure Json
+        allCellsBetweenFiles: All cell information for this library
+        writeDir: Write directory
 
     Returns:
         Dataframe with stats related to barcode and dp.Pageobject
     """
 
-    (barcodeTypeStatsDf, barcodeTypeStats) = createBarcodeTypeMetricsTables(demuxJson)
+    (barcodeTypeStatsDf, barcodeTypeStats) = createBarcodeTypeMetricsTables(demuxJson, libJson)
 
-    ligation_well_df = buildDfForPlatePlot(referencesPath, allCellsBetweenFiles, libJson, "Ligation")
+    ligation_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "lig")
     ligation_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_ligation_well.csv")
     # Matplotlib figure that represents umi count per well for ligation
-    ligationPerWell = DatapaneUtils.buildPlatePlot(ligation_well_df, "Ligation Plate", 100.0, "Unique Transcript Counts")
+    ligationPerWell = reportUtil.buildPlatePlot(ligation_well_df, "Ligation Plate", 10000.0, "Unique Transcript Counts")
 
-    pcr_well_df = buildDfForPlatePlot(referencesPath, allCellsBetweenFiles, libJson, "PCR")
+    pcr_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "pcr")
     pcr_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_pcr_well.csv")
     # Matplotlib figure that represents umi count per well for pcr
-    pcrPerWell = DatapaneUtils.buildPlatePlot(pcr_well_df, "PCR Plate", 100.0, "Unique Transcript Counts")
+    pcrPerWell = reportUtil.buildPlatePlot(pcr_well_df, "PCR Plate", 10000.0, "Unique Transcript Counts")
     
-    rt_well_df = buildDfForPlatePlot(referencesPath, allCellsBetweenFiles, libJson, "RT")
+    rt_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "rt")
     rt_well_df.to_csv(writeDir / "csv"/ f"library_{libName}_unique_reads_rt_well.csv")
     # Matplotlib figure that represents umi count per well for rt
-    readPerWell = DatapaneUtils.buildPlatePlot(rt_well_df, "RT Plate", 100.0, "Unique Transcript Counts")
+    readPerWell = reportUtil.buildPlatePlot(rt_well_df, "RT Plate", 10000.0, "Unique Transcript Counts")
 
     blocks = [dp.Text(f"## libName: {libName}"),
               readPerWell, ligationPerWell, pcrPerWell]
@@ -166,29 +155,35 @@ def buildBarcodesPage(demuxJson, libName, libJson, allCellsBetweenFiles, writeDi
     return (barcodeTypeStatsDf, dp.Page(blocks=blocks, title='Barcodes'), barcodeTypeStats)
 
 
-def createBarcodeTypeMetricsTables(demuxJson):
+def getBarcodeAlias(libStruct: Dict, name: str):
+    """Get the full name (alias) for a barcode from the library structure Json"""
+    for bc in libStruct['barcodes']:
+        if bc['name'] == name:
+            return bc.get('alias', name)
+    return None
+
+
+def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Dict):
     """
     Create dataframe for barcode type and create a datapane
     object for storing a table created with the statistics in the dataframe
 
     Args:
-        demuxJson (dict): Dictionary of demuxed metrics
+        demuxMetrics: bcParser metrics (from metrics.json)
+        libStruct: Library structure (lib.json)
 
     Returns:
         Dataframe and dp.Group object
     """
-    barcodes = demuxJson['barcodes']
-    barcodesDf = buildDfFromJSONDict(barcodes, "Barcode", "dict")
+    libStruct = json.load(open(libJson))
+    barcodesDf = buildDfFromJSONDict(demuxMetrics['barcodes'], "Barcode", "dict")
     tableGroup = []
-    allBarcodeTypes = list(barcodesDf['Barcode'].unique())
-
-    for barcodeType in allBarcodeTypes:
-        fullBarcodeTypeName = constants.BARCODE_SHORTHAND_TO_NAME[barcodeType]
-        subset = barcodesDf[barcodesDf['Barcode'] == barcodeType][['Match', 'Reads']]
-        styledDf = subset.style.pipe(GeneralUtils.styleTable, title=fullBarcodeTypeName)
-        table = DatapaneUtils.createTableIgnoreWarning(styledDf)
+    allBarcodes = list(barcodesDf['Barcode'].unique())
+    for bc in allBarcodes:
+        subset = barcodesDf[barcodesDf['Barcode'] == bc][['Match', 'Reads']]
+        styledDf = subset.style.pipe(reportUtil.styleTable, title=f"{getBarcodeAlias(libStruct, bc)} Barcodes")
+        table = reportUtil.mkTable(styledDf)
         tableGroup.append(table)
-
     return (barcodesDf, dp.Group(blocks=tableGroup, columns=2))
 
 
@@ -215,7 +210,7 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     barcodeReadsTotal.rename(columns={'Type': 'Status'}, inplace=True)
     barcodeReadsTotal['Percent'] = barcodeReadsPerc['Reads']
     
-    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(GeneralUtils.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(reportUtil.styleTable, title="Barcode Read Status", numericCols=['Reads'])
 
     total_reads = 0
     total_percent = 0
@@ -225,15 +220,15 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
         total_percent += float(row["Percent"][:-1])
     df_pass = barcodeReadsTotal[barcodeReadsTotal["Status"].str.contains("Pass")]
     df_pass.loc[len(df_pass.index)] = ['Error', total_reads, str(round(total_percent, 1))+"%"]
-    barcodeReadsTotalStyled = df_pass.style.pipe(GeneralUtils.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    barcodeReadsTotalStyled = df_pass.style.pipe(reportUtil.styleTable, title="Barcode Read Status", numericCols=['Reads'])
     
-    barcodeReadStats = DatapaneUtils.createTableIgnoreWarning(barcodeReadsTotalStyled)
-    barcodeReadStatsInternal = DatapaneUtils.createTableIgnoreWarning(barcodeReadsTotalStyledInternal)
+    barcodeReadStats = reportUtil.mkTable(barcodeReadsTotalStyled)
+    barcodeReadStatsInternal = reportUtil.mkTable(barcodeReadsTotalStyledInternal)
 
     (countsPerSampleDf, rtCountsPerSampleDf) = buildDfFromDemuxSampleMetrics(demuxJson)
     
     wellOrder = sorted(list(rtCountsPerSampleDf['rtWell'].unique()),
-                       key=functools.cmp_to_key(CalculationUtils.wellStringComp))
+                       key=functools.cmp_to_key(reportUtil.wellStringComp))
     rtCountsPerSampleDf['rtWell'] = pd.Categorical(rtCountsPerSampleDf['rtWell'], wellOrder)
     rtCountsPerSampleDf.sort_values(by=['rtWell'], inplace=True, ascending=False)
 
@@ -250,14 +245,14 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     readsPerSample = px.bar(
         countsPerSampleDf, x='Sample', y='TotalReads', color='Sample',
         height=900, color_discrete_map=colorMap,
-        template=constants.DEFAULT_FIGURE_STYLE,
+        template=reportUtil.DEFAULT_FIGURE_STYLE,
         title="Reads Per Sample", labels={"TotalReads": "Total Reads"})
     readsPerSample.update_layout(showlegend=False)
 
-    return (barcodeReadsTotal, dp.Page(blocks=[dp.Text(f"## libName: {libName}"),
-                                               dp.Group(multiSampleKneePlot, barcodeReadStats, columns=2),
-                                               dp.Group(readsPerSample, columns=1)], title='Reads'),
-            barcodeReadStatsInternal)
+    readsPage = dp.Page(blocks=[dp.Text(f"## libName: {libName}"),
+                       dp.Group(multiSampleKneePlot, barcodeReadStats, columns=2),
+                       dp.Group(readsPerSample, columns=1)], title='Reads')
+    return (barcodeReadsTotal, readsPage, barcodeReadStatsInternal)
 
 
 def matchColorsToNames(names) -> Dict[str, str]:
@@ -319,15 +314,11 @@ def makeMultisampleKneePlot(allCellsBetweenFiles):
     Returns:
         dp.Plot object and dataframe with data from all samples
     """
-    indiciesToInclude = set(CalculationUtils.getIndicesToInclude(max(allCellsBetweenFiles.index)))
-
-    allCellsBetweenFiles['rankOrder'] = allCellsBetweenFiles.index
-
-    plottingDf = allCellsBetweenFiles[allCellsBetweenFiles['rankOrder'].isin(indiciesToInclude)]
-
+    maxIndex = max(allCellsBetweenFiles.index) if len(allCellsBetweenFiles.index) else 0
+    indices = set(reportUtil.sparseLogCoords(maxIndex))
+    plottingDf = allCellsBetweenFiles[allCellsBetweenFiles.index.isin(indices)]
     fig = px.line(plottingDf, x=plottingDf.index, y='umis', color='sample', log_x=True, log_y=True,
-                  template=constants.DEFAULT_FIGURE_STYLE, labels={"index": "Cell Barcodes", "umis": "Unique Transcript Counts"})
-
+                  template=reportUtil.DEFAULT_FIGURE_STYLE, labels={"index": "Cell Barcodes", "umis": "Unique Transcript Counts"})
     return dp.Plot(fig), allCellsBetweenFiles
 
 
@@ -369,15 +360,15 @@ def buildDfFromJSONDict(jsonDict: Dict, name: str, valueDataType: str, choiceInd
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--libName", required=False, default=None)
-    parser.add_argument("--libJsonName", required=False, default=None)
-    parser.add_argument("--libMetrics", required=True)
-    parser.add_argument("--libraryStructPath", type=str, help="Relative path to references folder")
+    parser.add_argument("--libName", required=True)
+    parser.add_argument("--libStruct", required=True, type=Path)
+    parser.add_argument("--libMetrics", required=True, type=Path)
+    parser.add_argument("--demuxMetrics", required=True, type=Path, help="bcParser demux metrics json")
     parser.add_argument("--internalReport", action="store_true", default=False)
     
     args = parser.parse_args()
 
-    buildFastqReport(args.libName, args.libJsonName, Path(args.libMetrics), args.internalReport, Path(args.libraryStructPath))
+    buildFastqReport(args.libName, args.libStruct, args.demuxMetrics, args.libMetrics, args.internalReport)
 
 if __name__ == "__main__":
     main()

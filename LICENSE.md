@@ -4,7 +4,7 @@ This agreement (“Agreement” relates to the license, installation and/or use 
 
 ## 1. Definitions
 
-“Licensed Software” means the software (including ScaleBio Single-cell RNA Workflow) provided by ScaleBio to You and/or made available by ScaleBio in conjunction with Your purchase of a ScaleBio Product. You agree that such Licensed Software will solely be used in conjunction with ScaleBio product(s). 
+“Licensed Software” means the software (including the ScaleBio Seq Suite: RNA Workflow) provided by ScaleBio to You and/or made available by ScaleBio in conjunction with Your purchase of a ScaleBio Product. You agree that such Licensed Software will solely be used in conjunction with ScaleBio product(s). 
 
 “ScaleBio Product” means products purchased by You (including, but not limited to, ScaleBio Single Cell RNA Sequencing Kit). Such products include all components, reagents and consumables. 
 
