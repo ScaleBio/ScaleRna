@@ -10,8 +10,10 @@ For detailed information about the library and sample level QC reports see [qcRe
 | | `<sample>.reportStatistics.csv` | Summary and QC metrics for this sample in csv format |
 | | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library (potentially multiple samples) |
 | | `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastQC and trimming |
+| | `merged` | Reports for samples combined across multiple extended throughput plates / libraries
 |  `samples` | `<sample>.filtered/` | Pre-filtered gene expression matrix for cells above the unique read threshold |
 | | `<sample>.allCells.csv` | Metrics per cell-barcode, including barcodes / well positions
+| | `merged` | Output files for samples combined across multiple extended throughput plates / libraries
 | `fastq` | `fastqc/*_fastqc.html` | [fastqc](https://github.com/s-andrews/FastQC) report for each fastq file in the sequencing library |
 | | `Reports/` | Fastq generation summary reports from [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) |
 | `barcodes/<libName>.demux` | `<sample>.fastq.gz` | Sample fastq files (Demultiplexed and barcode error-corrected); only included with `--fastqOut true` |

@@ -163,7 +163,7 @@ def getBarcodeAlias(libStruct: Dict, name: str):
     return None
 
 
-def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Dict):
+def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Path):
     """
     Create dataframe for barcode type and create a datapane
     object for storing a table created with the statistics in the dataframe

@@ -1,37 +1,42 @@
 /*
-inputReads module that deals with preprocessing, demuxing and qc of input data
+Subworkflow for SaleRNA that deals with fastq generation, barcode processing, sample demux and qc of input data
+bcl-convert, fastqc, bcParser, trimFq
 */
+
 def getReadFromFqname(fqName) {
     m = ( fqName =~ /_([RI][12])[_.]/ )
     if (!m) { return null }
     return m[0][1]
 }
 
-// @channel_contents -> library name, matching key, fastq file
-// Function to add well coordinate to sample name to facilitate grouping downstream
-// Sample name is computed from filename and the well coordinate we're getting from the matching key
-// Filename is of the form {sampleName}_{wellCoordinate}*.fastq.gz
-// Function only called when splitFastq set to True
-def constructSampleNameWithWellCoordinate (channel_contents) {
-	def libName = channel_contents[0]
-	def matching_key = channel_contents[1]
-	def file = channel_contents[2]
-	def sample = file.getName().toString().tokenize('_')[0] + "." + channel_contents[1].tokenize("_")[1]
-	return tuple(sample, matching_key, file)
+// Extract sampleName and subsample (sample split by PCR well) for one subsample from bcParser output
+// This is for the case when fastq files are split by PCR index (splitFastq true, workflow starting from BCL)
+// 
+// @bcParserOut: library name, matching key, fastq file
+def constructSampleNameWithWellCoordinate (bcParserOut) {
+	def libName = bcParserOut[0]
+	def matching_key = bcParserOut[1] // In this case, this is libName_pcrWell
+	def file = bcParserOut[2]
+	def sampleName = file.getName().toString().tokenize('_')[0] // bcParser outputs are "sampleName_...fastq.gz"
+	def subsampleName = sampleName + "_" + matching_key.tokenize("_")[1]
+	return tuple(libName, sampleName, subsampleName, file)
 }
 
-// @channel_contents -> library name, matching key, fastq file
-// Function to compute sample name from filename
-// Filename is of the form {sampleName}_*.fastq.gz
-// Function only called when splitFastq set to False or when splitFastq is True but we're starting from fastq
-// We do not allow underscores in the sample name so we can take the
-// first element after tokenizing on "_"
-def constructSampleName (channel_contents) {
-	def libName = channel_contents[0]
-	def matching_key = channel_contents[1]
-	def file = channel_contents[2]
-	def sample = file.getName().toString().tokenize('_')[0]
-	return tuple(sample, matching_key, file)
+// Extract sampleName (and optionally subsample, split by RT well) for one bcParser output
+// Function only called when fastq files are not split by PCR barcode
+// (splitFastq set to False or we're starting from pre-generated fastq files)
+// @bcParserOut -> library name, matching key, fastq file
+def constructSampleName (bcParserOut, splitFastq) {
+	def libName = bcParserOut[0]
+	def matching_key = bcParserOut[1] // In this case, the base-name of one group of paired fastq files (R1,R2,I1)
+	def file = bcParserOut[2]
+	def tok = file.getName().toString().tokenize('_') // bcParser outputs are "sampleName_well_...fastq.gz"
+	def sampleName = tok[0]
+	def subsampleName = sampleName
+	if (splitFastq) {
+		subsampleName = "${sampleName}_${tok[1]}"
+	}
+	return tuple(libName, sampleName, subsampleName, file)
 }
 
 def throwError(errMessage) {
@@ -52,17 +57,15 @@ input:
 	path(libStructDir) // Directory containing the library structure definition (barcode sequence lists are loaded from here)
 	val(libStructName) // Filename of the library structure definition .json
 	path(runinfo) // RunInfo.xml from Sequencer RunFolder (Read-lengths etc.)
-	val(outDir)
-	val(splitFastq)
 output: 
 	path("samplesheet.csv")
-publishDir "${outDir}/fastq", mode: 'copy'
+publishDir "${params.outDir}/fastq", mode: 'copy'
 label 'small'
 script:
 	libJson = "$libStructDir/$libStructName"
 	opts = ""
-	if (splitFastq) {
-		opts += "--splitFastq"
+	if (params.splitFastq) {
+		opts += "--splitFastq "
 	}
 """
 	bclConvertSheet.py $samplesCsv $libJson $runinfo $opts > samplesheet.csv
@@ -75,13 +78,11 @@ process bclconvert {
 input: 
 	path(run)
 	path(samplesheet)
-	val(outDir)
-	val(bclConvertParams)
 output: 
 	path("fastq/*fastq.gz"), emit: fastq
 	path("fastq/Reports/*"), emit: stats
-publishDir "${outDir}/", pattern: 'fastq/Reports/*', mode: 'copy'
-publishDir "${outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
+publishDir "${params.outDir}/", pattern: 'fastq/Reports/*', mode: 'copy'
+publishDir "${params.outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
 
 
 script:
@@ -90,27 +91,26 @@ script:
 """
 	bcl-convert --sample-sheet $samplesheet --bcl-input-directory $run \
     --bcl-num-conversion-threads $wthreads --bcl-num-compression-threads $wthreads --bcl-num-decompression-threads $dthreads \
-    $bclConvertParams --output-directory fastq
+    $params.bclConvertParams --output-directory fastq
 """
 }
 
 // Run cutadapt on demuxed fastq files
 process trimFq {
 input:
-	tuple(val(name), path(transFastq), path(bcFastq), val(count))
-	val(trimAdapt)
+	tuple(val(id), val(subsample), path(transFastq), path(bcFastq), val(count))
 output: 
-	tuple(val(name), path("trimmed/${transName}"), path("trimmed/${bcName}"), emit: fastq)
-	tuple(val(name), path("*.trim_stats.json"), emit: stats)
+	tuple(val(id), val(subsample), path("trimmed/${transName}"), path("trimmed/${bcName}"), emit: fastq)
+	tuple(val(id), path("*.trim_stats.json"), emit: stats)
 	path("*.trim_stats"), emit: stats_for_multiqc
-tag "$name $count"
+tag "$id $count"
 
 script:
 	transName = transFastq.getName()
 	bcName = bcFastq.getName()
 """
 	mkdir trimmed
-	cutadapt -j${task.cpus} -e0.15 -O2 -m16 ${trimAdapt} -o trimmed/${transName} -p trimmed/${bcName} $transFastq $bcFastq --json ${name}.trim_stats.json | tee ${name}.${count}.trim_stats
+	cutadapt -j$task.cpus -e0.15 -O2 -m16 $params.trimAdapt -o trimmed/$transName -p trimmed/$bcName $transFastq $bcFastq --json ${id}.trim_stats.json | tee ${id}.${count}.trim_stats
 """
 }
 
@@ -119,11 +119,10 @@ script:
 process fastqc {
 input:
 	path(fq)
-	val(outDir)
 output:
 	path("fastqc/*.html"), emit: html
 	path("fastqc/*.zip"), emit: zip
-publishDir "${outDir}/fastq/", mode: 'copy'
+publishDir "${params.outDir}/fastq/", mode: 'copy'
 label 'small'
 tag "${fq.getSimpleName()}"
 """
@@ -136,10 +135,9 @@ tag "${fq.getSimpleName()}"
 process multiqc {
 input:
 	path(reports)
-	val(outDir)
 output:
 	path("multiqc_report.html")
-publishDir "${outDir}/reports", mode: 'copy'
+publishDir "${params.outDir}/reports", mode: 'copy'
 label 'optional'
 """
 	multiqc .
@@ -158,20 +156,19 @@ input:
 	val(libStructName) 
 	// Input fastq file
 	tuple(val(libName), val(matching_key), path(fqFiles), val(count))
-	val(outputDir)
 output:
 	//Output fastqs might not exist if the input has no passing reads
-	tuple(val(libName), val(matching_key), path("$outDir/*_S[1-9]*_R?[._]*fastq.gz"), emit: readFq, optional: true)
-	tuple(val(libName), val(matching_key), path("$outDir/*_S[1-9]*_BC[._]*fastq.gz"), emit: bcFq, optional: true)
-	path("$outDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
-	path("$outDir/*.tsv")
-	tuple(val(libName), path("$outDir/metrics.json"), emit: metrics)
-publishDir "${outputDir}/${dir_name}", pattern: "$outDir/*gz", enabled: params.fastqOut
-publishDir "${outputDir}/${dir_name}", mode: 'copy', pattern: "$outDir/*{txt,tsv,json}"
+	tuple(val(libName), val(matching_key), path("$demuxDir/*_S[1-9]*_R?[._]*fastq.gz"), emit: readFq, optional: true)
+	tuple(val(libName), val(matching_key), path("$demuxDir/*_S[1-9]*_BC[._]*fastq.gz"), emit: bcFq, optional: true)
+	path("$demuxDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
+	path("$demuxDir/*.tsv")
+	tuple(val(libName), path("$demuxDir/metrics.json"), emit: metrics)
+publishDir "$params.outDir/${dir_name}", pattern: "$demuxDir/*gz", enabled: params.fastqOut
+publishDir "$params.outDir/${dir_name}", mode: 'copy', pattern: "$demuxDir/*{txt,tsv,json}"
 tag "$libName $count"
 
 script:
-	outDir = "${libName}.demux"
+	demuxDir = "${libName}.demux"
 	libStruct = "$libStructDir/$libStructName"
 	if (params.splitFastq) {
 		dir_name = "barcodes/bcparser.${count}/"
@@ -179,7 +176,7 @@ script:
 		dir_name = "barcodes/"
 	}
 """
-	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --write-fastq --write-barcode-fq --out $outDir
+	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --write-fastq --write-barcode-fq --out $demuxDir
 """
 }
 
@@ -187,14 +184,13 @@ process merge_demux {
 input:
     tuple(val(libName), path("demux_metrics*.json"))
     path(libJson)
-	val(outDir)
 output:
     tuple(val(libName), path("metrics.json"))
-    publishDir "${outDir}/barcodes", mode:'copy'
+    publishDir "${params.outDir}/barcodes", mode:'copy'
 tag "$libName"
 script:
     """
-    mergeBCparserOutput.py --bc_jsons demux_metrics* --lib_json ${libJson}
+    mergeBCparserOutput.py --bc_jsons demux_metrics* --lib_json $libJson
     """
 }
 
@@ -206,31 +202,24 @@ take:
 	libJson
     runFolder
     fastqDir
-    fastqSamplesheet
-    trimFastq
-    fastqc
-    outDir
-    bclConvertParams
-	splitFastq
-	trimAdapt
 main:
 	runDir = runFolder
 	fqDir = fastqDir
 	fqs = null
 	if (runDir != null) {
-		if (fastqSamplesheet == null) {
+		if (params.fastqSamplesheet == null) {
 			makeBclConvertSamplesheet(samplesCsv, libJson.getParent(), libJson.getName(), 
-				file("$runDir/RunInfo.xml", checkIfExists:true), outDir, splitFastq)
+				file("$runDir/RunInfo.xml", checkIfExists:true))
 			fqSheet = makeBclConvertSamplesheet.out
 		} else {
-			fqSheet = file(fastqSamplesheet)
+			fqSheet = file(params.fastqSamplesheet)
 		}
-		bclconvert(file(runDir), fqSheet, outDir, bclConvertParams)
+		bclconvert(file(runDir), fqSheet)
 		fqs = bclconvert.out.fastq.flatten()
 	} else if (fqDir != null) {
 		fqs = Channel.fromPath("$fqDir/*fastq.gz", checkIfExists: true)
 	} else {
-		throwError("Must specify either 'runFolder' or 'fastqDir'")
+		throwError("Must specify either '--runFolder' or '--fastqDir' when running alignment")
 	}
 
 	// fqs -> (fastq file)
@@ -242,11 +231,11 @@ main:
 		def fname = file.getName().toString()
 		def libName = fname.tokenize('_')[0]
 		// Construct matching key to join on later on in the workflow
-		if (splitFastq) {
+		if (params.splitFastq) {
 			def matching_key = constructMatchingKey(fname)
 			return tuple(libName, constructMatchingKey(fname), file)
 		}
-		// Matching key is just the library name if splitFastq is false
+		// Matching key is just the library name if params.splitFastq is false
 		else {
 			return tuple(libName, libName, file)
 		}
@@ -260,7 +249,7 @@ main:
 	// The last map is to remove the extra library name element(it[0]) in the tuple that we get after the cross
 	fqSamples = samples.map({it.libName}).unique().cross(pairedFqFiles).map{it[1]}
 	
-	// The counter aids in output directory naming when splitFastq is set to true
+	// The counter aids in output directory naming when params.splitFastq is set to true
 	def count = 1
 	fqSamples = fqSamples.map{
 		def libName = it[0]
@@ -273,9 +262,9 @@ main:
 	
 	// Check that for each library (unique libName in samples.csv), we have a complete set of fastq files
 	// checkFastq -> (libName, sampleName, matchingKey, Fastqs, counter)
-	// This slightly strange channel construction (including it.sample) works around the lack of 'left-join'
-        // in nextflow (this way we can distinguish 'left-only' and 'right-only' join results)
-	checkFastq = samples.map{[it.libName, it.sample]}.unique({it[0]}).join(fqSamples, remainder: true)
+	// This slightly strange channel construction (including it.id) works around the lack of 'left-join'
+    // in nextflow (this way we can distinguish 'left-only' and 'right-only' join results)
+	checkFastq = samples.map{ [it.libName, it.id] }.unique{ it[0] }.join(fqSamples, remainder: true)
 	checkFastq.dump(tag:'checkFastq')
 	checkFastq.map {
 		// If samples.csv has a library name which does not have corresponding fastq files
@@ -298,78 +287,80 @@ main:
 	}
 
 	// Process cell-barcodes and (optionally) split fastqs into samples based on tagmentation barcode
-	barcodeParser(samplesCsv, libJson.getParent(), libJson.getName(), fqSamples, outDir)
+	barcodeParser(samplesCsv, libJson.getParent(), libJson.getName(), fqSamples)
 
-	// If starting from runfolder and splitFastq is true, we do not split in bcparser,
+	// If starting from runfolder and params.splitFastq is true, we do not split in bcparser,
 	// so the sample name does not have the well coordinate in it
-	// We add the well coordinate to the sample name by calling the constructSampleNameWithWellCoordinate function
-	if (splitFastq && runDir != null)  {
+	// We take the well coordinate from the matching key (based on fastq name) and add it
+	if (params.splitFastq && runDir != null)  {
 		readFqs = barcodeParser.out.readFq.transpose().map{
 			constructSampleNameWithWellCoordinate(it)
-		}.groupTuple(by:[0,1], size:2)
+		}.groupTuple(by:[0,1,2], size:2) // Group by libName, sampleName and matching_key
 
 		bcFqs = barcodeParser.out.bcFq.transpose().map{
 			constructSampleNameWithWellCoordinate(it)
 		}
 	}
-	// Indicates splitFastq is False, or splitFastq is True and we're starting the workflow from
-	// fastq files. In that case we split in bcParser and the well coordinate is already attached
+	// Indicates params.splitFastq is False, or params.splitFastq is True and we're starting the workflow from
+	// fastq files. In that case we split in bcParser and the well coordinate is already attached to the sample name
 	else {
 		// Each barcodeParser run outputs fastqs for each sample in one list
 		// readFqs -> ([[sample_name]], fastq_matching_key, file)
 		readFqs = barcodeParser.out.readFq.transpose().map{
-			constructSampleName(it)
-		}.groupTuple(by:[0,1], size:2) // We still get R1 and R2, even if only R2 will be used downstream
+			constructSampleName(it, params.splitFastq)
+		}.groupTuple(by:[0,1,2], size:2) // We still get R1 and R2, even if only R2 will be used downstream
 		readFqs.dump(tag:'readFqs')
 		
 		// Same as above but for the barcode reads (_BC_)
 		// No group tuple because only one barcode read file is produced per sample
 		bcFqs = barcodeParser.out.bcFq.transpose().map{
-			constructSampleName(it)
+			constructSampleName(it, params.splitFastq)
 		}
 	}
 	bcFqs.dump(tag:'bcFqs')
 	// Combine Read2 and barcode read for each sample / sample x RT combination
-	// demuxFqs -> (sample_name, read2, barcode read)
+	// demuxFqs -> (sample_id, read2, barcode read)
 	// matching key is dropped here
-	// if splitFastq true, then sample_name="{sample_name}.{rt_well_coordinate}"
-	demuxFqs = readFqs.join(bcFqs, by:[0,1]).map({tuple(it[0], it[2][1], it[3])})
-	demuxFqs.dump(tag:'demuxFqs')
+	// if params.splitFastq true, then sample_name="{sample_name}.{rt_well_coordinate}"
+	demuxFqs = readFqs.join(bcFqs, by:[0,1,2]).map{ [it[0], it[1], it[2], it[3][1], it[4]] }
+	demuxFqs.dump(tag:'demuxFqs1')
+	// bcParser outputs (demuxFqs) are by libName and sampleName.
+	// We need to add the sample id (can occur multiple times for splitFastq subsamples)
+	demuxFqs = demuxFqs.combine(samples.map{ [it.libName, it.sample, it.id] }, by:[0,1])
+	demuxFqs.dump(tag:'demuxFqs2')
+	demuxFqs = demuxFqs.map{ [it[5], it[2], it[3], it[4]] }
+	//demuxFqs -> (sampleId, subsample, R2, BC)
+	demuxFqs.dump(tag:'demuxFqs3')
 
-	if (trimFastq) {
+	if (params.trimFastq) {
 		demuxFqs = demuxFqs.toSortedList().flatMap()
+		// We need a unique count on trimJobs to make output file names distinct
+		// across split fastqs (when running from --fastqDir)
 		def counter=1
-		demuxFqs = demuxFqs.map {
-			def libName = it[0]
-			def transFastq = it[1]
-			def bcFastq = it[2]
-			tuple(libName, transFastq, bcFastq, counter++)
-		}
-		trimFq(demuxFqs, trimAdapt)
+		trimJobs = demuxFqs.map { it + (counter++) } 
+		trimFq(trimJobs)
 		demuxFqs = trimFq.out.fastq
-		
-		//demuxFqs -> (sample name, R2, BC)
 		demuxFqs.dump(tag:'trimmedFqs')
 	}
-	if (fastqc) {
+	if (params.fastqc) {
 		// Exclude I1 and I2 from fastqc
 		mainReads = fqSamples.flatMap{it.get(2)}.filter{getReadFromFqname(it.getName())[0] == 'R'}
 		channel.dump(tag:'fastqc')
-		fastqc(mainReads, outDir)
+		fastqc(mainReads)
 		reports = fastqc.out.zip
 		if (runDir != null) {
 			reports = reports.mix(bclconvert.out.stats)
 		}
-		if (trimFastq) {
+		if (params.trimFastq) {
 			reports = reports.mix(trimFq.out.stats_for_multiqc)
 		}
-		multiqc(reports.collect(), outDir)
+		multiqc(reports.collect())
 	}
 
-	if (splitFastq) {
+	if (params.splitFastq) {
 		// Need to merge the bcParser outputs for a single library together
         organized_demux = barcodeParser.out.metrics.groupTuple()
-        merge_demux(organized_demux, libJson, outDir)
+        merge_demux(organized_demux, libJson)
 		metrics = merge_demux.out
     }
 	else {

@@ -34,7 +34,8 @@ class CellStat:
 def sample_metric(sample: str, libStruct: Path,
                   star_out: Path, featureType: str, starMatrix: str, isBarnyard: bool,
                   minReads: int, calcCellThres: bool, cells: int|None, 
-                  expectedCells: int|None, topCellPercent: int|None, minCellRatio: int|None):
+                  expectedCells: int|None, topCellPercent: int|None, minCellRatio: int|None, 
+                  isMerge: bool):
     """
     Generate metrics for a single sample
 
@@ -67,7 +68,13 @@ def sample_metric(sample: str, libStruct: Path,
         splitBarcodes(sample, libStruct, allCells)
 
     generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample)
-    allCells["sample"] = sample
+    
+    #When this is a merged sample the variable sample is actually a "group" name.
+    #In order to get the correct sample name we extract it from the barcode.
+    if(isMerge):
+        allCells["sample"] = [bc.split("_")[1] for bc in allCells.index.tolist()]
+    else:
+        allCells["sample"] = sample
 
     metricsDir = Path(".", f"{sample}_metrics")
     metricsDir.mkdir(parents=True)
@@ -480,8 +487,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sample", type=str,
                         help="The name of the sample for which a report is being generated")
-    parser.add_argument("--samplesheet", type=str,
-                        help="Path to the samples.csv containing information about libName")
     parser.add_argument("--libStruct", type=Path)
     parser.add_argument("--starFeature", default="GeneFull_Ex50pAS", type=str,
                         help="STARSolo feature type used")
@@ -498,22 +503,17 @@ def main():
                         help="Compute a heuristic cell threshold based on parameters below")
     parser.add_argument("--topCellPercent", type=int, help="Cell threshold parameter")
     parser.add_argument("--minCellRatio", type=int, help="Cell threshold parameter")
+    parser.add_argument("--expectedCells", type=int, help="Number of cells expected in data")
 
     parser.add_argument("--isBarnyard", default=False, action="store_true")
+    parser.add_argument("--isMerge", default=False, action="store_true")
     
     args = parser.parse_args()
 
-    sampleSheetDf = pd.read_csv(args.samplesheet)
-
-    if 'expectedCells' in sampleSheetDf.columns:
-        expectedCells = int(sampleSheetDf.loc[sampleSheetDf['sample'] == args.sample]['expectedCells'])
-    else:
-        expectedCells = 0
-    
     sample_metric(args.sample, args.libStruct,
                   args.star_out, args.starFeature, args.starMatrix,
-                  args.isBarnyard, args.minReads, args.calcCellThreshold, args.cells, expectedCells,
-                  args.topCellPercent, args.minCellRatio)
+                  args.isBarnyard, args.minReads, args.calcCellThreshold, args.cells, args.expectedCells,
+                  args.topCellPercent, args.minCellRatio, args.isMerge)
 
 if __name__ == "__main__":
     main()

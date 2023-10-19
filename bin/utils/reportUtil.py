@@ -5,7 +5,7 @@ import operator
 import statistics
 import warnings
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import datapane as dp
 import matplotlib.colors as colors
@@ -192,10 +192,12 @@ def buildPlatePlot(df, title, threshold, colorbar_title=None):
 
 def buildDfForSamplePlatePlot(libJson, index, referencesPath):
     well_dict = {}
+    lib_json_entry_dict = None
     for entry in libJson["barcodes"]:
         if "alias" in entry:
             if entry["alias"] == index.split("_")[0]:
                 lib_json_entry_dict = entry
+    assert lib_json_entry_dict is not None, f"Could not find barcode {index.split('_')[0]} in libJson"
     max_letter, max_number = getMaxWellNumberAndLetter(referencesPath / f'{lib_json_entry_dict["sequences"]}')
     wellPlateCellCountDf = pd.DataFrame(0, columns=range(1, max_number+1), index=getCharacterIndices(65,ord(max_letter)+1))
     wellPlateNumCellDf = wellPlateCellCountDf.copy()
@@ -205,24 +207,24 @@ def buildDfForSamplePlatePlot(libJson, index, referencesPath):
             well_dict[key] = []
     return wellPlateCellCountDf, wellPlateNumCellDf, well_dict
 
-def barcodeLevelPlots(referencesPath: Path, sampleName: str, cells: pd.DataFrame,
-                        index: str, title: str, internalReport: bool, libJson: dict,
-                        writeDir=None) -> dp.Group:
+def barcodeLevelPlots(libJson: dict, libStructDir: Path, sampleId: str, cells: pd.DataFrame,
+                      index: str, title: str, internalReport: bool, 
+                      writeDir:Optional[Path]=None) -> dp.Group:
     """
     Function to compute statistics to build plate like plot for
     displaying statistics on a per well basis
 
     Args:
-        cells (pd.DataFrame): Dataframe containing information to plot
-        index (str): Column name to sort dataframe by
-        title (str): Title of the plot
-        internalReport (bool): Whether report is being generated for internal purposes
-        writeDir (str): Write directory
+        cells: Metrics per cell-barcode
+        index: Column name to sort dataframe by
+        title: Title of the plot
+        internalReport: Extra plots for internal QC
+        writeDir: Output directory
 
     Returns:
         dp.Group object containing all the plots
     """
-    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(libJson, index, referencesPath)
+    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(libJson, index, libStructDir)
     
     num_cells_dict = cells[index].value_counts().to_dict() 
     
@@ -253,9 +255,10 @@ def barcodeLevelPlots(referencesPath: Path, sampleName: str, cells: pd.DataFrame
     readsPerIndexBox = buildPlatePlot(wellPlateCellCountDf, "Unique Transcript Counts Per Cell", 100.0)
     cellsPerIndexBar = buildPlatePlot(wellPlateNumCellDf, "Number of cells", 1.0)
     namePrefix = title.replace(" ", "_")
-    if writeDir is not None and internalReport:
-        cellsPerIndexBar.savefig(writeDir / f"{sampleName}_figures" / f"CellCount_By_{namePrefix}_Heatmap.png")
-        readsPerIndexBox.savefig(writeDir / f"{sampleName}_figures" / f"UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
-    wellPlateCellCountDf.to_csv(writeDir / "csv" / f"{sampleName}_unique_transcript_counts_by_{namePrefix}_well.csv")
-    wellPlateNumCellDf.to_csv(writeDir / "csv" / f"{sampleName}_num_cells_by_{namePrefix}_well.csv")
+    if writeDir:
+        if internalReport:
+            cellsPerIndexBar.savefig(writeDir / f"{sampleId}_figures" / f"CellCount_By_{namePrefix}_Heatmap.png")
+            readsPerIndexBox.savefig(writeDir / f"{sampleId}_figures" / f"UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
+        wellPlateCellCountDf.to_csv(writeDir / "csv" / f"{sampleId}_unique_transcript_counts_by_{namePrefix}_well.csv")
+        wellPlateNumCellDf.to_csv(writeDir / "csv" / f"{sampleId}_num_cells_by_{namePrefix}_well.csv")
     return dp.Group(dp.Text(f'## {title}'), dp.Group(dp.Plot(cellsPerIndexBar), dp.Plot(readsPerIndexBox), columns=2))

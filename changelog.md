@@ -1,5 +1,9 @@
 # Version 1.4
-* Add i5/dual indexing support
+## 1.4.0
+* Add support for RNA kit v1.1 (i5-indexed plates)
+* Add support for Extended Throughput kit (multi-plate merging)
+* Add 'reporting workflow' to re-generate outputs from previous alignments
+* Add analysis metadata to sample QC report
 * Remove read2 (RNA) read-length trimming default (previously was 48bp)
 * Changed column label for PCR barcode in `allcells.csv` (`PCR` to `i7`/`i5`)
 * Fix line-count in the header of the merged, unfiltered STARSolo `.mtx` files

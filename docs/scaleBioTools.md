@@ -14,3 +14,7 @@ These tools are included in the `scaleRna` docker container image; when running 
 ```/PATH/TO/ScaleRNA/envs/download-scale-tools.sh```
  
   This will install the binaries in `ScaleRNA/bin` (inside the Nextflow workflow directory), from where they will be available during workflow execution.
+
+# bc_parser
+The `bc_parser` output mode we are using for the RNA workflow puts all barcode information in the *_BC fastq file and the transcript sequence in *_R2. That makes the output easily compatible with STARSolo (and other tools). Specifically, the sequence in *_BC.fastq is 
+`Ligation_BC (9bp) + RT_BC + i7(PCR) + UMI`

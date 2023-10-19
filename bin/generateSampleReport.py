@@ -4,9 +4,10 @@ Generate the sample report (HTML and .csv) from per-sample metrics
 """
 
 import argparse
+import datetime
 import json
 from pathlib import Path
-from typing import List
+from typing import Dict,List
 
 import datapane as dp
 import numpy as np
@@ -17,35 +18,36 @@ from utils import fileUtils, reportUtil, statsUtils
 from utils.base_logger import logger
 
 
-def buildSampleReport(sample_metrics:str, sample:str, internalReport:bool, isBarnyard:bool, libStructJson:Path, trim_stats:List[Path]):
+def buildSampleReport(writeDir: Path, sampleMetrics:Path, sampleId:str, internalReport:bool, isBarnyard:bool, libStructJson:Path, trim_stats:List[Path],
+                      metadata:Dict[str,str]):
     """
     Entry function for building sample report
 
     Args:
-        sample_metrics: Path to folder containing csv files defining the metrics for a single sample
-        sample: Sample name
-        internalReport: Flag denoting whether report is for internal purposes
-        isBarnyard: Flag denoting whether sample is barnyard or not
+        writeDir: Report Output directory
+        sampleMetrics: Folder containing csv files defining the metrics for a single sample
+        sampleId: Unique Sample ID (e.g. `SampleNam.LibName`)
+        internalReport: Additional plots for internal QC
+        isBarnyard: Add barnyard plots and metrics
         libStructJson: Library structure json (in directory with sequence files, etc.)
         trim_stats: json files containing cutadapt output
     """
-    allCells = pd.read_csv(f"{sample_metrics}/allCells.csv", index_col=0)
+    allCells = pd.read_csv(sampleMetrics / "allCells.csv", index_col=0)
     filtered_short_reads, avg_trimmed_length = get_trim_stats_metrics(trim_stats)
 
-    writeDir = Path(".", "reports")
     Path(writeDir, "csv").mkdir(parents=True, exist_ok=True)
     if internalReport or isBarnyard:
-        Path(writeDir, f"{sample}_figures").mkdir()
-    
-    pages = []
-
-    readsPage, statsDf, complexity_df, internalReportBlocks = \
-        buildReadsPage(sample, allCells, writeDir, internalReport, filtered_short_reads, avg_trimmed_length)
-    pages.append(readsPage)
+        Path(writeDir, f"{sampleId}_figures").mkdir()
     
     libStructDir = libStructJson.parent
     libStruct = json.load(open(libStructJson))
-    allIndexPlots, barcodesPage = buildBarcodesPage(libStructDir, allCells, writeDir, sample, internalReport, libStruct)
+
+    pages = []
+    readsPage, statsDf, complexity_df, internalReportBlocks = \
+        buildReadsPage(sampleId, allCells, writeDir, internalReport, filtered_short_reads, avg_trimmed_length, metadata)
+    pages.append(readsPage)
+
+    allIndexPlots, barcodesPage = buildBarcodesPage(libStruct, libStructDir, allCells, writeDir, sampleId, internalReport)
     pages.append(barcodesPage)
     
     if internalReport:
@@ -55,22 +57,22 @@ def buildSampleReport(sample_metrics:str, sample:str, internalReport:bool, isBar
     
     if isBarnyard:
         scoreBarn(allCells)
-        (barnyardPage, barnyardStat) = buildBarnyardPage(allCells, writeDir, sample)
+        (barnyardPage, barnyardStat) = buildBarnyardPage(allCells, writeDir, sampleId)
         statsDf = pd.concat([statsDf, barnyardStat])
         pages.append(barnyardPage)
 
     report = dp.Report(blocks=pages)
 
     logger.debug(f"Writing reportStatistics csv, report to {str(writeDir.resolve())}")
-    new_complexity_df = pd.DataFrame(columns=['Metric','Value','Category'])
-    for index, row in complexity_df.iterrows():
-        new_complexity_df.loc[new_complexity_df.index.size] = [f"Median unique transcript counts at {row['x']} total reads per cell",
-                                                               row["unique_read"], "Extrapolated Complexity"]
-    statsDf = pd.concat([statsDf, new_complexity_df], axis=0)
-    statsDf.to_csv(writeDir / "csv"/ f"{sample}.reportStatistics.csv", index=False, header=False,
+    complexity_stats = complexity_df.apply(lambda row:pd.Series({
+            'Metric': f"Median unique transcript counts at {row['x']} total reads per cell",
+            'Value': row["unique_read"],
+            'Category': "Extrapolated Complexity"}), axis=1)
+    statsDf = pd.concat([statsDf, complexity_stats], axis=0)
+    statsDf.to_csv(writeDir / "csv"/ f"{sampleId}.reportStatistics.csv", index=False, header=False,
                    columns=["Category", "Metric", "Value"])
 
-    report.save(writeDir / f"{sample}.report.html")
+    report.save(writeDir / f"{sampleId}.report.html")
 
 def get_trim_stats_metrics(trim_stats):
     """
@@ -160,8 +162,9 @@ def makeReadStatsDf(allCells:pd.DataFrame, filtered_short_reads:float):
         filtered_short_reads: Number of filtered reads (or NaN)
     """
     stats = []
+    totalReads = intOrNan(allCells['reads'].sum() + filtered_short_reads)
     stats.append({'Category':'Reads', 'Metric': 'Total Sample Reads',
-                  'Value': intOrNan(allCells['reads'].sum() + filtered_short_reads)})
+                  'Value': totalReads if totalReads is not np.NaN else 'NA'})
     stats.append({'Category':'Reads', 'Metric': 'Passing Sample Reads',
                   'Value': intOrNan(allCells['reads'].sum())})
     stats.append({'Category':'Reads', 'Metric': 'Reads Mapped to Genome',
@@ -187,7 +190,8 @@ def makeExtraReadStatsDf(allCells, average_trimmed_length):
                   'Value': format(average_trimmed_length, ".1f")})
     return pd.DataFrame(stats)
 
-def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalReport:bool, filtered_short_reads:float, avg_trimmed_length:float):
+def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalReport:bool, filtered_short_reads:float, avg_trimmed_length:float,
+                   metadata:Dict[str,str]):
     """
     Function to build a datapane page that mainly shows plots related
     to reads
@@ -200,6 +204,7 @@ def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalRep
             generated for internal r&d run
         filtered_short_reads: Number of reads filtered out after trimming (or NaN)
         avg_trimmed_length: Average read length after trimming (or NaN)
+        metadata: Information about the sample and analysis run [FieldName -> Value]
 
     Returns:
         dp.Page object and concatenated dataframe of various statistics
@@ -213,15 +218,17 @@ def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalRep
     cellStatsDf = makeCellStatsDf(allCells)
     statsDf = pd.concat([statsDf, readStatsDf, extraStatsDf, cellStatsDf])
 
-    uniqueReadsFig, complexity_df = makeUniqueReadsFig(allCells, internalReport)
-    summaryStatsTable = reportUtil.createMetricTable(cellStatsDf, title="Cell Metrics")
+    infoDf = pd.DataFrame.from_dict({'Metric':metadata.keys(), 'Value':metadata.values()})
+    infoTable = reportUtil.createMetricTable(infoDf, title="Sample Information")
+    cellTable = reportUtil.createMetricTable(cellStatsDf, title="Cell Metrics")
     mappingTable = reportUtil.createMetricTable(readStatsDf, title="Read Metrics")
 
     rankPlot = makeRankPlot(allCells, writeDir, sample, internalReport)
+    uniqueReadsFig, complexity_df = makeUniqueReadsFig(allCells, internalReport)
     genesVersusUMIsScatter = buildGeneXReadScatter(allCells)
     saturationScatter = buildSaturationScatter(allCells)
-    groupBlocks = [rankPlot, uniqueReadsFig, mappingTable, summaryStatsTable, genesVersusUMIsScatter, saturationScatter]
-    page = dp.Page(dp.Group(blocks=groupBlocks, columns=2), title="Cells")
+    groupBlocks = [infoTable, cellTable, mappingTable, rankPlot, uniqueReadsFig, genesVersusUMIsScatter, saturationScatter]
+    page = dp.Page(dp.Group(blocks=groupBlocks, columns=2), title="Summary")
 
     internalReportBlocks = []
     if internalReport:
@@ -242,39 +249,39 @@ def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalRep
     return page, statsDf, complexity_df, internalReportBlocks
 
 
-def buildBarcodesPage(referencesPath, allCells, writeDir, sampleName, internalReport, libJson):
+def buildBarcodesPage(libStruct:Dict[str,str], libStructDir:Path, allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
     """
     Build datapane page for barcodes
 
     Args:
-        referencesPath (Path): Reference files
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
-        writeDir (path): Path object pointing to the write directory
-        sampleName (str): Sample name
-        internalReport (bool): Flag for internal report
-        libJson (dict): Library json
+        libStruct: Library structure definition
+        libStructDir: Directory with barcode sequences ec.
+        allCells: Metrics per cell-barcode
+        writeDir: Ouput directory
+        sampleId: Unique ID of this sample
+        internalReport: Extra plots for internal QC
 
     Returns:
         allIndexPlots for internalReports (empty otherwise)
         dp.Page object with shared figures figures
     """
     blocksToRender = []
-    allIndexPlots = createBarcodeLevelFigures(referencesPath, allCells, writeDir, sampleName, internalReport, libJson)
+    allIndexPlots = createBarcodeLevelFigures(libStruct, libStructDir, allCells, writeDir, sampleId, internalReport)
     blocksToRender.append(allIndexPlots["rt"])
     return allIndexPlots, dp.Page(blocks=blocksToRender, title="Barcodes")
 
 
-def createBarcodeLevelFigures(referencesPath, allCells, writeDir, sampleName, internalReport, libJson):
+def createBarcodeLevelFigures(libStruct:Dict, libStructDir:Path, allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
     """
     Create plots for the barcodes page
 
     Args:
-        referencesPath (Path): Reference files
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
-        writeDir (path): Path object pointing to the write directory
-        sampleName (str): Sample name
-        internalReport (bool): Flag for internal report
-        libJson (dict): Library json
+        libStruct: Library structure definition
+        libStructDir: Directory with barcode sequences ec.
+        allCells: Metrics per cell-barcode
+        writeDir: Ouput directory
+        sampleId: Unique ID of this sample
+        internalReport: Extra plots for internal QC
 
     Returns:
         dp.Group object with the relevant figures
@@ -282,11 +289,12 @@ def createBarcodeLevelFigures(referencesPath, allCells, writeDir, sampleName, in
     passingCells = allCells.loc[allCells['pass']] # .loc needed here to keep the column names if zero passing cells
 
     allIndexPlots = {}
-    for bc in libJson['barcodes']:
+    for bc in libStruct['barcodes']:
         if bc.get('type') not in ['library_index', 'umi']:
             alias = bc.get('alias') or bc['name']
-            indexPlots = reportUtil.barcodeLevelPlots(referencesPath, sampleName, passingCells, f"{alias}_alias", 
-                                                      f"{alias} Index", internalReport, libJson, writeDir=writeDir)
+            indexPlots = reportUtil.barcodeLevelPlots(
+                libStruct, libStructDir, sampleId, passingCells, f"{alias}_alias", 
+                f"{alias} Index", internalReport, writeDir)
             allIndexPlots[bc['name']] = indexPlots
     return allIndexPlots
 
@@ -356,77 +364,43 @@ def buildSaturationScatter(allCells):
     return dp.Plot(fig)
 
 
-def makeRankPlot(allCells, writeDir, sampleName, internalReport):
+def makeRankPlot(allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
     """
     Make a kneeplot using @field in @data; drawing a
     vertical line at @threshold
-
-    Args:
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
-        writeDir (path): Path object pointing to the write directory
-        sampleName (str): Sample name
-        internalReport (bool): Whether report is being generated for internal purposes
-
-    Returns:
-        dp.Plot object with the figure
     """
     indices = reportUtil.sparseLogCoords(allCells.index.size)
     fig = px.line(allCells.iloc[indices], x=indices, y="umis", labels={"x": "Cell barcodes", "umis": "Unique transcript counts"},
                   log_x=True, log_y=True, template=reportUtil.DEFAULT_FIGURE_STYLE, title="Barcode Rank Plot")
-
     fig.add_vline(x=max(1, allCells['pass'].sum()), line_dash="dash", line_color="green")
-    
     if indices.size > 0:
         fig.update_layout(xaxis_range=[1, np.log10(max(indices)+1)])
-
     if internalReport:
-        saveFigureAsPng(writeDir, sampleName, fig, "BarcodeRankPlot.png")
-    
+        saveFigureAsPng(writeDir, sampleId, fig, "BarcodeRankPlot.png")
     return dp.Plot(fig)
 
 
-def saveFigureAsPng(writeDir, sampleName, fig, pngName: str):
+def saveFigureAsPng(writeDir:Path, sampleId:str, fig, pngName: str):
     """
     Save a plotly figure object as png
-
-    Args:
-        writeDir (path): Path object pointing to the write directory
-        sampleName (str): Sample name
-        fig (obj): Plotly object containing the figure
-        pngName (str): Name of png file to be saved
     """
-    fig.write_image(writeDir / f"{sampleName}_figures" / pngName)
+    fig.write_image(writeDir / f"{sampleId}_figures" / pngName)
 
 
-def buildBarnyardPage(allCells, writeDir, sampleName) -> dp.Page:
+def buildBarnyardPage(allCells:pd.DataFrame, writeDir:Path, sampleId:str) -> tuple[dp.Page, pd.DataFrame]:
     """
-    Build a datapane page for barnyard samples
-
-    Args:
-       allCells (pd.DataFrame): Dataframe containing all data for this sample
-
-    Returns:
-        dp.Page object with the necessary figures
+    Build a datapane page and metrics datagrame for barnyard analysis
     """
     barnyardStatsDf = makeBarnyardStatsDf(allCells)
-
     barnyardStatsTable = reportUtil.createMetricTable(barnyardStatsDf, title="")
-    barnyardPlot = makeBarnyardScatterPlot(allCells, writeDir, sampleName)
+    barnyardPlot = makeBarnyardScatterPlot(allCells, writeDir, sampleId)
     plotGroup = dp.Group(barnyardStatsTable, barnyardPlot, columns=2)
     return (dp.Page(plotGroup, title="Barnyard"), barnyardStatsDf)
 
 
-def makeBarnyardScatterPlot(allCells, writeDir, sampleName):
+def makeBarnyardScatterPlot(allCells:pd.DataFrame, writeDir:Path, sampleId:str):
     """
-    Function to make a scatter plot for barnyard samples
-
-    Args:
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
-        writeDir (path): Path object pointing to the write directory
-        sampleName (str): Sample name
-
-    Returns:
-        dp.Plot object with the figure
+    Scatter plot transcript count per species for all cells
     """
     cellsToPlot = allCells[:allCells['pass'].sum()*2]
     if cellsToPlot.index.size > 5000:
@@ -436,7 +410,7 @@ def makeBarnyardScatterPlot(allCells, writeDir, sampleName):
                      color_discrete_map=reportUtil.BARNYARD_COLORMAP, labels={"humanUmis": "Human UMIs", "mouseUmis": "Mouse UMIs"})
 
     fig.update_traces(selector=dict(name='None'), visible="legendonly")
-    saveFigureAsPng(writeDir, sampleName, fig, "Barnyard_ScatterPlot.png")
+    saveFigureAsPng(writeDir, sampleId, fig, "Barnyard_ScatterPlot.png")
 
     return dp.Plot(fig)
 
@@ -444,12 +418,6 @@ def makeBarnyardScatterPlot(allCells, writeDir, sampleName):
 def makeBarnyardStatsDf(allCells: pd.DataFrame) -> pd.DataFrame:
     """
     Compute statistics for barnyard samples
-
-    Args:
-        allCells: Per-cell metrics
-
-    Returns:
-        Dataframe with the barnyard stats
     """
     passingBarnyardCells = allCells.loc[(allCells['pass']) & (~allCells.species.isin(['Ambiguous', 'None']))]
     ncells = max(1, passingBarnyardCells.index.size)
@@ -547,16 +515,28 @@ def intOrNan(x: int|float|None) -> int|float:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--sampleName', required=False, default=None)
-    parser.add_argument("--sample_metrics", required=True, type=Path)
+    parser.add_argument("--outDir", required=True, type=Path, help="Output directory")
+    parser.add_argument("--sampleId", required=True, help="Unique ID of the sample during the workflow (e.g. SampleName.LibName)")
+    parser.add_argument("--sampleMetrics", required=True, type=Path)
     parser.add_argument("--libraryStruct", required=True, type=Path)
     parser.add_argument("--trim_stats", nargs='+', type=Path)
     parser.add_argument("--internalReport", action="store_true", default=False)
     parser.add_argument("--isBarnyard", action="store_true", default=False)
-
+    parser.add_argument('--sampleName', help='Metadata for report')
+    parser.add_argument("--libName", default='NA', help='Metadata for report')
+    parser.add_argument("--barcodes", default='NA', help='Metadata for report' )
+    parser.add_argument("--workflowVersion", default='NA', help='Metadata for report')
     args = parser.parse_args()
-    buildSampleReport(args.sample_metrics, args.sampleName, args.internalReport, args.isBarnyard, args.libraryStruct, args.trim_stats)
+
+    metadata = {
+        'Sample Name': args.sampleName or args.sampleId, # Default to ID if no name is given
+        'Library Name': args.libName,
+        'Sample Barcodes': args.barcodes,
+        'Workflow Version': args.workflowVersion,
+        'Analysis Date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'Library Structure': args.libraryStruct.stem,
+    }
+    buildSampleReport(args.outDir, args.sampleMetrics, args.sampleId, args.internalReport, args.isBarnyard, args.libraryStruct, args.trim_stats, metadata)
 
 if __name__ == "__main__":
     main()
-
