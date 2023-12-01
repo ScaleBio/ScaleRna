@@ -6,8 +6,8 @@ import groovy.json.JsonSlurper
 include { inputReads } from './modules/inputReads.nf'
 include { alignment } from './modules/alignment.nf'
 include { multiSampleReport} from './modules/sampleReport.nf'
-include { sampleReport } from './modules/sampleReport.nf' addParams(merge:false)
-include { sampleReport as mergeSampleReport } from './modules/sampleReport.nf' addParams(merge:true)
+include { sampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:false)
+include { sampleReport as mergeSampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:true)
 
 // Load .json file into object
 // (reference genomes, library design, etc.)
@@ -108,13 +108,14 @@ input:
 	val(libJsonFn)
 	path(libStructDir)
 output:
-	path("reports/library_${libName}.report.html")
-	path("reports/csv/library_${libName}*.csv")
+	path("${outDir}/library_${libName}.report.html")
+	path("${outDir}/csv/library_${libName}*.csv")
 publishDir "$params.outDir", mode: 'copy'
 label 'report'
 label 'optional'
 tag "$libName"
 script:
+	outDir = "reports/library"
 	if (params.internalReport) {
 		opts = "--internalReport"
 	} else {
@@ -123,7 +124,7 @@ script:
 	libJson = "${libStructDir}/${libJsonFn}"
 """
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateFastqReport.py --libName $libName --demuxMetrics $demuxJson --libStruct $libJson --libMetrics metrics $opts
+	generateFastqReport.py --libName $libName --outDir $outDir --demuxMetrics $demuxJson --libStruct $libJson --libMetrics metrics $opts
 """
 }
 
@@ -141,7 +142,7 @@ tag "$group"
 script:
 	sampleIDs = String.join(" ", samples)
 	matrixFn = Utils.starMatrixFn(params.starMulti)
-	outDir = "merged/${group}.star.solo/"
+	outDir = "${group}.merged/${group}.merged.star.solo/"
 """
 	mergeRawSTARoutput.py --star_dirs $starDirs --star_feature $params.starFeature --star_matrix $matrixFn --sample_ids $sampleIDs --out_dir $outDir
 """
@@ -245,7 +246,7 @@ workflow {
 
 	if (params.reporting) {
 		// Load STARsolo output from previous pipeline output directory
-		soloOut = samples.map{tuple(it.id, file("${it.resultDir}/alignment/${it.id}.star.solo", checkIfExists:true))}
+		soloOut = samples.map{tuple(it.id, file("${it.resultDir}/alignment/${it.id}/${it.id}.star.solo", checkIfExists:true))}
 		// We are skipping read trimming statistics when re-running reporting
 		// Doesn't matter for anything other than the field in the HTML report
 		trimStats = Channel.empty()

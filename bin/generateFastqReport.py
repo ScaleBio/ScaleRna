@@ -20,7 +20,7 @@ BARCODE_SHORTHAND_TO_NAME = {
     'lig': 'Ligation Barcodes', 'rt': 'Reverse Transcription Barcodes',
     'umi': 'UMI'}
 
-def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool):
+def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool, outDir:str):
     """
     Build the library report by calling relevant functions
 
@@ -34,8 +34,8 @@ def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path,
     demuxMetrics = json.load(open(demuxJson))
     libStruct = json.load(open(libJson))
     
-    # Reports will be written to the reports folder
-    writeDir = Path(".", "reports")
+    # Reports will be written to the <outDir> folder
+    writeDir = Path(".", outDir)
     Path(writeDir, "csv").mkdir(parents=True, exist_ok=True)
 
     # Call function that builds a datapane page that depicts a cellBarcodes vs umi
@@ -240,7 +240,9 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     sampleOrder.append('Unknown')
     countsPerSampleDf['Sample'] = pd.Categorical(countsPerSampleDf.Sample, sampleOrder)
     countsPerSampleDf.sort_values(by=['Sample'], inplace=True)
-
+    # Add in html magic to ensure that sample names are read in as string due to plotly express
+    # not recognizing numeric sample names as strings
+    countsPerSampleDf['Sample'] = ['<span>'+elem+'</span>' for elem in countsPerSampleDf['Sample']]
     colorMap = matchColorsToNames(list(countsPerSampleDf['Sample'].unique()))
     readsPerSample = px.bar(
         countsPerSampleDf, x='Sample', y='TotalReads', color='Sample',
@@ -361,6 +363,7 @@ def buildDfFromJSONDict(jsonDict: Dict, name: str, valueDataType: str, choiceInd
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--libName", required=True)
+    parser.add_argument("--outDir", required=True)
     parser.add_argument("--libStruct", required=True, type=Path)
     parser.add_argument("--libMetrics", required=True, type=Path)
     parser.add_argument("--demuxMetrics", required=True, type=Path, help="bcParser demux metrics json")
@@ -368,7 +371,7 @@ def main():
     
     args = parser.parse_args()
 
-    buildFastqReport(args.libName, args.libStruct, args.demuxMetrics, args.libMetrics, args.internalReport)
+    buildFastqReport(args.libName, args.libStruct, args.demuxMetrics, args.libMetrics, args.internalReport, args.outDir)
 
 if __name__ == "__main__":
     main()

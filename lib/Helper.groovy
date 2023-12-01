@@ -49,9 +49,8 @@ class Helper {
         workflow_summary['starMulti'] = params.starMulti
         workflow_summary['trimFastq'] = params.trimFastq
         workflow_summary['cellTyping'] = params.cellTyping
-        workflow_summary['splitFastq'] = params.splitFastq
-        workflow_summary['task_max_memory'] = params.task_max_memory
-        workflow_summary['task_max_cpus'] = params.task_max_cpus
+        workflow_summary['max_memory'] = params.task_max_memory
+        workflow_summary['max_cpus'] = params.task_max_cpus
         return [ 'Core Nextflow options' : workflow_summary ]
     }
 

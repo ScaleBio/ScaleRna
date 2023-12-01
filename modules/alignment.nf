@@ -5,23 +5,20 @@ input:
 	val(library) // library.json (contains STAR barcode parameters)
 	tuple(val(sample), val(count), path("transcript*.fastq.gz"), path("barcode*.fastq.gz")) // transcript and BC fastq file
 output: 
-	tuple(val(sample), path("$starDir/Aligned.sortedByCoord.out.bam*"), emit: bam, optional: true)
-	tuple(val(sample), path("$starDir/Log*"), emit: log)
-	tuple(val(sample), path("$soloDir"), emit: solo)
-publishDir "$pubDir", pattern: "*.solo", mode: 'copy'
-publishDir "$pubDir", pattern: "$starDir/*bam*"
-publishDir "$pubDir", pattern: "$starDir/Log*", mode: 'copy'
+	tuple(val(sample), path("Aligned.sortedByCoord.out.bam"), emit: bam, optional: true)
+	tuple(val(sample), path("Log.*"), emit: log)
+	tuple(val(sample), path("${sample}"), emit: solo)
+
+// If params.splitFastq is true publishDir = params.outDir/alignment/<sample>/split/
+// If params.splitFastq is false publishDir = params.outDir/alignment/<sample>
+// If params.splitFastq is true output filenames = <sample>.<count>.*
+// If params.splitFastq is false output filenames = <sample>.*
+// BAM file is only published if params.bamOut = true
+publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/" : "$params.outDir/alignment/$sample"}, pattern: "${sample}", mode: 'copy', saveAs: { params.splitFastq ? "${sample}.${count}.star.solo" : "${sample}.star.solo"}
+publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/${sample}.${count}.star.align" : "$params.outDir/alignment/$sample/${sample}.star.align"}, pattern: "*bam", mode: 'copy', saveAs: {params.splitFastq ? "${sample}.${count}.bam" : "${sample}.bam"}, enabled: params.bamOut
+publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/${sample}.${count}.star.align" : "$params.outDir/alignment/$sample/${sample}.star.align"}, pattern: "Log*", mode: 'copy'
 tag "$sample"
 script:
-	if (params.splitFastq) {
-		pubDir = "${params.outDir}/alignment/split"
-		starDir = "${sample}.${count}.star.align"
-		soloDir = "${sample}.${count}.star.solo"
-	} else {
-		pubDir = "${params.outDir}/alignment"
-		starDir = "${sample}.star.align"
-		soloDir = "${sample}.star.solo"
-	}
 	barcodeParam = library["star_barcode_param"]
 	if (params.bamOut) {
 		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outSAMunmapped Within"
@@ -33,9 +30,8 @@ script:
 	$barcodeParam ${params.starTrimming} \
     $bamOpts --outSJtype None --soloCellReadStats Standard \
 	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers ${params.starMulti} \
-	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat \
-	--outFileNamePrefix $starDir/
-	mv $starDir/Solo.out $soloDir
+	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat
+	mv Solo.out/ $sample
 """
 }
 
@@ -47,9 +43,9 @@ input:
 output:
     tuple(val(sample), path(outDir), emit: merge)
 label "mergeRawStarOutput"
-publishDir "$params.outDir/alignment", mode:'copy'
+publishDir "$params.outDir/alignment/", mode:'copy'
 script:
-	outDir = "${sample}.star.solo/"
+	outDir = "${sample}/${sample}.star.solo"
 	matrixFn = Utils.starMatrixFn(params.starMulti)
 """
     mergeRawSTARoutput.py --star_dirs Solo.out* --star_feature $params.starFeature --star_matrix $matrixFn --out_dir $outDir
@@ -66,7 +62,7 @@ main:
 	// Sort the input fq files from inputReads to not break caching
 	fqsSorted = fastqs.toSortedList().flatMap()
 	fqsSorted.dump(tag:'fqsSorted')
-	
+
 	if (params.splitFastq) {
 		// Group all fastq files for one subsample
 		// alignFqGroupedBySampleAndWell -> (sampleID, subsample, [transcript], [barcode])

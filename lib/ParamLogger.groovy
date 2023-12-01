@@ -40,7 +40,7 @@ class ParamLogger {
         if (params.runFolder) {
             workflow_opts['runFolder'] = params.runFolder
         }
-        if (params.runFolder) {
+        if (params.reporting) {
             workflow_opts['reporting'] = params.reporting
         }
         workflow_opts['samples'] = params.samples

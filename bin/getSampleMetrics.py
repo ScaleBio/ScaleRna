@@ -270,22 +270,6 @@ def getStarStats(starSummaryFn:Path) -> Dict[str, float | str]:
         stats[split_line[0]] = val
     return stats
 
-
-def getCellThreshold(cells, allCells, star_cells):
-    """
-    Calculate and set the UMI threshold for cells based on STAR output
-    files
-
-    Args:
-        cells (int): Cell thresholding number set by user
-        allCells (pd.DataFrame): Dataframe with info on all cells
-        star_cells (int): Estimated number of cells computed by STAR
-
-    Returns:
-        Cell threshold and cells variable
-    """
-
-
 def calculateCustomCellThreshold(allCells:pd.DataFrame, expectedCells:int, topCellPercent:float, minCellRatio:float, minReads:int) -> int:
     """
     Calculate and set UMI threshold for cells based on our

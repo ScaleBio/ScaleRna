@@ -32,13 +32,13 @@ def makeUniqueSampleIds(cols, rows):
 
     The same sampleName can occur once per library. (e.g. multiple PCR plates).
     Hence we can use "sampleName.libName" as unique id
-    (or just sampleName if no multiple libraries are specified).
+    (if multiple libraries or libName is not specified Scale.RNA is used as the default libName).
     """
     sampleInd = cols.index("sample")
     libInd = cols.index("libName") if "libName" in cols else None
     for r in rows:
         if libInd is None:
-            r.insert(0, r[sampleInd])
+            r.insert(0, f"{r[sampleInd]}.ScaleRNA")
         else:
             r.insert(0, f"{r[sampleInd]}.{r[libInd]}")
     cols.insert(0, "id")

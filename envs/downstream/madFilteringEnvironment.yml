@@ -1,0 +1,8 @@
+name: madFiltering
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - r-base=4.2.0
+  - r-argparse=2.1.5
+  - r-matrix=1.4
