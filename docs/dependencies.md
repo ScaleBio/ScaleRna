@@ -3,7 +3,7 @@
 The ScaleBio RNA workflow requires a number of dependencies to run. These include ScaleBio developed and open-source executables, python libraries, etc. There are three alternative ways to provide these dependencies; select one of these, depending on what is easiest on your system, and follow the instructions below.
 
 ## Using Docker or Singularity
-If your system supports [docker containers](https://www.docker.com/), this is the recommended way to handle all dependencies for the ScaleBio RNA workflow. We provide pre-build docker containers and the workflow is setup to automatically use them.
+If your system supports [docker containers](https://www.docker.com/), this is the recommended way to handle all dependencies for the ScaleBio RNA workflow. We provide pre-built docker containers and the workflow is setup to automatically use them.
 This is enabled by adding `-profile docker` to the nextflow command-line.
 
 If your system does not support *docker*, [singularity](https://sylabs.io/docs/) is an alternative that is enabled on many HPC clusters (2.3.x or newer). Setting `-profile docker,singularity` (**no space**) will use the _singularity_ engine for all dependencies. The environment variable `NXF_SINGULARITY_CACHEDIR` can be used to control where singularity images are stored. This should be a writable location that is available on all compute nodes. Similarly `TMPDIR` should be changed from the default `/tmp` to a location writable from the container if necessary.

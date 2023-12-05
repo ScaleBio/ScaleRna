@@ -1,7 +1,10 @@
 reports:
-    "reports/*.report.html":
-        display: "QC Summary report"
+    "reports/library/library_*.report.html":
+        display: "Library QC report"
+    "reports/**.report.html":
+        display: "Sample QC report"
     "reports/multiqc_report.html":
         display: "FASTQ MultiQC"
     "reports/allSamples.reportStatistics.csv":
         display: "All sample metrics"
+    

@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """
-Get metrics on a per sample basis from STAR solo output
+Compute cell-threshold and metrics for one sample from STAR solo output
 """
-import pandas as pd
 import collections
-import numpy as np
+from dataclasses import dataclass
 import os
 import itertools as it
 import json
@@ -13,77 +12,76 @@ import argparse
 import sys
 from typing import Dict
 from pathlib import Path
-from utils.ReportUtil import CellStat, GeneralUtils
-from utils.base_logger import logger
 
-def sample_metric(sample: str, demuxJson: dict, referencesPath: Path, libStruct,
-                  star_out: Path, featureType: str, starMatrix: str,
-                  useSTARthreshold: bool, isBarnyard: bool,
-                  cells: int = None, expectedCells: int = None, 
-                  topCellPercent: int = None, minCellRatio: int = None,
-                  minReads: int = None):
+import pandas as pd
+import numpy as np
+
+from utils.base_logger import logger
+from utils import fileUtils, statsUtils
+
+@dataclass
+class CellStat:
+    """
+    Total UMI and gene-counts per cell
+    """
+    genes: int = 0 # Total number of genes detected
+    humanGenes: int = 0 # Human genes (for barnyard only)
+    mouseGenes: int = 0 # mouse genes "
+    umis: int = 0 # Number of UMIs / transcripts detected
+    humanUmis: int = 0 # Per species (for barnyard)
+    mouseUmis: int = 0
+
+def sample_metric(sample: str, libStruct: Path,
+                  star_out: Path, featureType: str, starMatrix: str, isBarnyard: bool,
+                  minReads: int, calcCellThres: bool, cells: int|None, 
+                  expectedCells: int|None, topCellPercent: int|None, minCellRatio: int|None, 
+                  isMerge: bool):
     """
     Generate metrics for a single sample
 
     Args:
         sample: Name of sample
-        demuxJson: Demuxed metrics
-        useSTARthreshold: Whether to use star thresholding or not
-        isBarnyard: Whether sample is barnyard or not
+        libStruct: Path to library json
+
         star_out: STAR Solo output
         featureType: STAR feature used for quantification (exon, gene, etc.)
         starMatrix: Name of STAR matrix output to use (matrix.mtx or with multimappers)
+        isBarnyard: Whether sample is barnyard or not
+        minReads: Parameter used for cell thresholding calculation
+        calcCellThres: Use custom cell-threshold (or the one from STAR)?
         cells: Cell thresholding
-        libStruct: Path to library json
         expectedCells: Parameter used for cell thresholding calculation
         topCellPercent: Parameter used for cell thresholding calculation
-        minCellRatio: Parameter used for cell thresholding calculation
-        minReads: Parameter used for cell thresholding calculation
+        minCellRatio: Parameter calcCellThresused for cell thresholding calculation
 
     """
     
     sampleSpecificFilePaths = resolveSampleSpecificFilePaths(star_out, sample, featureType, starMatrix)
-    
-    validateInput(sampleSpecificFilePaths)
-    
-    metricsDir = Path(".", f"{sample}_metrics")
-    
     detectedGenes = instantiateGenesDf(sampleSpecificFilePaths)
-    
     cellBarcodes = instantiateBarcodesDf(sampleSpecificFilePaths)
-    
-    star_cells = getStarStats(sampleSpecificFilePaths)
-    
-    if isBarnyard:
-        barnCounts = countBarn(sampleSpecificFilePaths, cellBarcodes, detectedGenes)
-        allCells, cells = addStatsAndCallCells(sampleSpecificFilePaths, cells, star_cells,
-                                               expectedCells, topCellPercent, minCellRatio,
-                                               minReads, barnCounts, useSTARthreshold)
-    else:
-        allCells, cells = addStatsAndCallCells(sampleSpecificFilePaths, cells, star_cells,
-                                               expectedCells, topCellPercent, minCellRatio,
-                                               minReads, None, useSTARthreshold)
-    
-    Path(metricsDir, "sample_metrics").mkdir(parents=True)
+    star_stats = getStarStats(sampleSpecificFilePaths['summaryFn']) if not calcCellThres else None
+    transcriptCounts = countTranscripts(sampleSpecificFilePaths, cellBarcodes, detectedGenes, isBarnyard)
+    allCells = cellStats(sampleSpecificFilePaths, transcriptCounts, isBarnyard)
+    callCells(allCells, star_stats, minReads, cells, expectedCells, topCellPercent, minCellRatio)
 
     if (libStruct is not None):
-        barcodesToPlot = splitBarcodes(demuxJson, sample, libStruct, allCells, referencesPath)
+        splitBarcodes(sample, libStruct, allCells)
 
     generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample)
-
-    logger.debug(f"Writing barcodesToPlot, allCells to {str(metricsDir.resolve())}")
-
-    with open(f"{metricsDir}/sample_metrics/barcodesToPlot.json", "w") as f:
-        json.dump(barcodesToPlot, f)
     
-    with open(f"{metricsDir}/sample_metrics/demuxJson.json", "w") as f:
-        json.dump(demuxJson, f)
+    #When this is a merged sample the variable sample is actually a "group" name.
+    #In order to get the correct sample name we extract it from the barcode.
+    if(isMerge):
+        allCells["sample"] = [bc.split("_")[1] for bc in allCells.index.tolist()]
+    else:
+        allCells["sample"] = sample
 
-    allCells["sample"] = sample
+    metricsDir = Path(".", f"{sample}_metrics")
+    metricsDir.mkdir(parents=True)
     allCells.to_csv(f"{metricsDir}/allCells.csv")
 
 
-def splitBarcodes(demuxJson, sample, libStruct, allCells, referencesPath):
+def splitBarcodes(sample:str, libStruct:Path, allCells:pd.DataFrame):
     """
     Function that uses `level` and `alias` values in each element
     of lib.json barcodes object to split barcodes.
@@ -91,63 +89,48 @@ def splitBarcodes(demuxJson, sample, libStruct, allCells, referencesPath):
     defining part of the CB sequence has a `level` and `alias` field.
     See current lib.json under references folder for examples
 
+    Results are added to the allCells dataframe
+
     Args:
-        demuxJson (dict): Demuxed metrics
-        sample (str): Sample name
-        libStruct (str): Path to library json
-        allCells (pd.DataFrame): Information about all cells
-        referencesPath (Path): Reference files
-    Returns:
-        Dictionary of barcodes to plot in report stage
+        sample: Sample name
+        libStruct: Path to library structure definition json
+        allCells: Information about all cells
     """
+    libDir = libStruct.parent # Directory container lib structure Json and sequence files
+    libJson = fileUtils.readJSON(libStruct, preserveDictOrder=True)
+    barcodeInfo = libJson['barcodes']
 
-    sampleBarcodeAliases = {}
-    for name, bc in demuxJson["samples"][sample]["barcodes"].items():
-        sampleBarcodeAliases[bc['sequence']] = name
-
-    libDirJSON = GeneralUtils.readJSON(referencesPath/libStruct, preserveDictOrder=True)
-    sampleBarcode = libDirJSON['sample_barcode']
-    barcodeInfo = libDirJSON['barcodes']
-
-    scDefiningBarcodes = [
+    cellBarcodesByLevel = [
         barcodeMeta for barcodeMeta in barcodeInfo
         if barcodeMeta.get('type', None) != 'library_index'
         and barcodeMeta.get('type', None) != 'umi']
+    # We need to keep the barcodes in the original order from lib.json so that
+    # it matches the order in which they were concatinated by bcParser (cell barcode / index)
+    # Hence we rely on barcode in lib.json being grouped by level to make the group-by call work
+    # cellBarcodesByLevel.sort(key=lambda bc: bc['level'])
 
-    groupByLevel = it.groupby(scDefiningBarcodes, key=lambda x: x['level'])
-
-    curIndex = 0
-    barcodesToPlot = {}
-
-    for level, group in groupByLevel:
-        groupAsList = list(group)
-        barcodeSize = sum([x['length'] for x in groupAsList])
-        barcodeFullName = groupAsList[0]['alias']
-        barcodeName = groupAsList[0]['name']
-        barcodes = [b[curIndex:barcodeSize+curIndex] for b in allCells.index]
+    # Overall cell-barcode is the concatination of all individual cell-barcodes
+    curBcSeqStartIndex = 0 
+    for level, bcParts in it.groupby(cellBarcodesByLevel, key=lambda x: x['level']):
+        # Single barcode level might have multiple sub-barcodes (e.g. bead barcode blocks)
+        # These will be concatinated and reported as one barcode
+        bcParts = list(bcParts)
+        bcInfo = bcParts[0]
+        barcodeFullName = bcInfo['alias']
+        barcodeLen = sum([x['length'] for x in bcParts])
+        bcSubSeq = slice(curBcSeqStartIndex, barcodeLen+curBcSeqStartIndex)
+        barcodes = [b[bcSubSeq] for b in allCells.index]
         allCells[barcodeFullName] = barcodes
-        curIndex += barcodeSize
+        curBcSeqStartIndex += barcodeLen
+        # Load the ids for specific barcode sequences (e.g. well coordinates) for the current barcode level
+        bcIds = {}
+        with open(libDir/f"{bcInfo['sequences']}") as f:
+            for line in f:
+                splat = line.rstrip().split('\t')
+                bcIds[splat[0]] = splat[1]
 
-        if barcodeName == sampleBarcode and len(sampleBarcodeAliases) > 0:
-            allCells[f"{barcodeFullName}_alias"] = allCells[barcodeFullName].apply(lambda x: sampleBarcodeAliases[x])
-            barcodesToPlot[level] = {'alias': barcodeFullName,
-                                     'possibleValues': list(sampleBarcodeAliases.values()),
-                                     'orderAsWellAliases': True}
-
-        else:
-            barcode_mapping = {}
-            with open(referencesPath/f"{groupAsList[0]['sequences']}") as f:
-                for line in f:
-                    line = line.rstrip()
-                    barcode_mapping[line.split("\t")[0]] = line.split("\t")[1]
-
-            allCells[f'{barcodeFullName}_alias'] = allCells.apply(lambda row: barcode_mapping[row[barcodeFullName]], axis=1)
-
-            barcodesToPlot[level] = {'alias': barcodeFullName,
-                                     'possibleValues': list(sampleBarcodeAliases.values()),
-                                     'orderAsWellAliases': False}
-
-    return barcodesToPlot
+        bcSeqIds = allCells[barcodeFullName].apply(lambda seq: bcIds[seq])
+        allCells[f'{barcodeFullName}_alias'] = bcSeqIds
 
 
 def resolveSampleSpecificFilePaths(star_out: Path, sample: str, featureType: str, starMatrix: str) -> Dict[str, Path]:
@@ -164,22 +147,13 @@ def resolveSampleSpecificFilePaths(star_out: Path, sample: str, featureType: str
         path to file
     """
     exprMatrixPrefix = star_out / featureType
-    return dict(featuresFn=exprMatrixPrefix / "raw" / 'features.tsv',
+    files = dict(featuresFn=exprMatrixPrefix / "raw" / 'features.tsv',
                 barcodesFn=exprMatrixPrefix / "raw" / 'barcodes.tsv',
                 matrixFn=exprMatrixPrefix / "raw" / starMatrix,
                 summaryFn=exprMatrixPrefix / "Summary.csv",
                 cellReadsFn=exprMatrixPrefix / "CellReads.stats")
-
-
-def validateInput(sampleSpecificFilePaths):
-    """
-    Function to validate that input files exist
-
-    Args:
-        sampleSpecificFilePaths (dict): Dictionary where key is placeholder for
-            a STAR output file name and value is path to the file
-    """
-    GeneralUtils.ensurePathsExist(sampleSpecificFilePaths)
+    fileUtils.ensurePathsExist(files)
+    return files
 
 
 def instantiateGenesDf(sampleSpecificFilePaths):
@@ -214,14 +188,13 @@ def instantiateBarcodesDf(sampleSpecificFilePaths):
     Returns:
         Dataframe with cell barcodes
     """
-    cellBarcodes = pd.read_csv(sampleSpecificFilePaths['barcodesFn'], sep='\t', header=None)
-    cellBarcodes.columns = ['Barcode']
+    cellBarcodes = pd.read_csv(sampleSpecificFilePaths['barcodesFn'], sep='\t', header=None, names=['Barcode'])
     cellBarcodes.index = cellBarcodes.index + 1
 
     return cellBarcodes
 
 
-def countBarn(sampleSpecificFilePaths, cellBarcodes, detectedGenes):
+def countTranscripts(sampleSpecificFilePaths, cellBarcodes, detectedGenes, isBarnyard):
     """
     Read in statistics from raw matrix.mtx to compute barnyard specific metrics
 
@@ -239,88 +212,75 @@ def countBarn(sampleSpecificFilePaths, cellBarcodes, detectedGenes):
         # Read through header
         for i in range(3):
             matrixFile.readline()
-
+            
         for line in matrixFile:
             split_line = line.split()
+            # Individual expression counts can be fractions, due to multimapper resolution
             gene, cell, count = int(split_line[0]), int(split_line[1]), float(split_line[2])
             cid = cell-1
+                
             if count == 0: continue
-
-            if detectedGenes.species[gene] == "hs":
-                cells[cid].genes += 1
-                cells[cid].humanGenes += 1
-                cells[cid].humanUmis += count
-                cells[cid].umis += count
-
-            elif detectedGenes.species[gene] == "mm":
-                cells[cid].genes += 1
-                cells[cid].mouseGenes += 1
-                cells[cid].mouseUmis += count
-                cells[cid].umis += count
-
+                
+            if isBarnyard:
+                
+                if detectedGenes.species[gene] == "hs":
+                    cells[cid].genes += 1
+                    cells[cid].humanGenes += 1
+                    cells[cid].humanUmis += count
+                    cells[cid].umis += count
+                    
+                elif detectedGenes.species[gene] == "mm":
+                    cells[cid].genes += 1
+                    cells[cid].mouseGenes += 1
+                    cells[cid].mouseUmis += count
+                    cells[cid].umis += count
+                    
+                else:
+                    print(detectedGenes.iloc[gene])
+                    
             else:
-                print(detectedGenes.iloc[gene])
+                cells[cid].genes += 1
+                cells[cid].umis += count
+    # For consistency with STAR CellReadMetrics output, we round the total expression (UMI) count
+    for cell in cells:
+        cell.umis = round(cell.umis)
     allCells = pd.DataFrame(cells, index=cellBarcodes.Barcode)
     return allCells
 
 
-def getStarStats(sampleSpecificFilePaths):
+def getStarStats(starSummaryFn:Path) -> Dict[str, float | str]:
     """
     Read in star stats and return a dictionary with the stats
 
     Args:
-        sampleSpecificFilePaths (dict): Dictionary where key is placeholder for
+        sampleSpecificFilePaths: Input f
             a STAR output file name and value is path to the file
 
     Returns:
-        Dictionary with the star stats
+        StatName -> Value (numbers converted to float)
     """
     stats = {}
-
-    for line in open(sampleSpecificFilePaths['summaryFn']):
+    for line in open(starSummaryFn):
         split_line = line.strip().split(',')
-        stats[split_line[0]] = split_line[1]
-    
-    return stats["Estimated Number of Cells"]
+        val = split_line[1]
+        try:
+            val = float(val)
+        except ValueError:
+            pass # Not a number
+        stats[split_line[0]] = val
+    return stats
 
-
-def getCellThreshold(cells, allCells, star_cells):
-    """
-    Calculate and set the UMI threshold for cells based on STAR output
-    files
-
-    Args:
-        cells (int): Cell thresholding number set by user
-        allCells (pd.DataFrame): Dataframe with info on all cells
-        star_cells (int): Estimated number of cells computed by STAR
-
-    Returns:
-        Cell threshold and cells variable
-    """
-    if not cells:
-        cells = star_cells
-
-    umis = allCells.umis
-    k = len(umis) - cells - 1
-
-    cellThreshold = max(20, np.partition(umis, k)[k])
-
-    logger.debug(f"STAR cell threshold {cellThreshold}")
-
-    return cellThreshold, cells
-
-
-def calculateCustomCellThreshold(allCells, expectedCells, topCellPercent, minCellRatio, minReads):
+def calculateCustomCellThreshold(allCells:pd.DataFrame, expectedCells:int, topCellPercent:float, minCellRatio:float, minReads:int) -> int:
     """
     Calculate and set UMI threshold for cells based on our
     custom logic
 
     Args:
-        allCells (pd.DataFrame): Dataframe with information on all cells
-        expectedCells (int): Cell thresholding parameter
-        topCellPercent (int): Cell thresholding parameter
-        minCellRatio (int): Cell thresholding parameter
-        minReads (int): Cell thresholding parameter
+        allCells: Dataframe with per-cell information
+        expectedCells: Cell thresholding parameter
+        topCellPercent: Cell thresholding parameter
+        minCellRatio: Cell thresholding parameter
+        minReads: Cell thresholding parameter
 
     Returns:
         Cell threshold
@@ -330,19 +290,16 @@ def calculateCustomCellThreshold(allCells, expectedCells, topCellPercent, minCel
     
     if expectedCells == 0:
         expectedCells = (allCells[field] >= minReads).sum()
-    
     if expectedCells == 0:
         return minReads
     
-    threshold = np.percentile(allCells[field][:expectedCells], (topCellPercent))/minCellRatio
-
-    cellThreshold = max(threshold, minReads)
+    topCellCount = np.percentile(allCells[field][:expectedCells], (topCellPercent)) 
+    threshold = max(topCellCount/minCellRatio, minReads)
     
-    logger.debug(f"Custom cell threshold {cellThreshold}")
+    logger.debug(f"Custom cell threshold {threshold}")
     logger.debug(f"Expected number of cells {expectedCells}")
-    logger.debug(f"Top cell UMI value {np.percentile(allCells[field][:expectedCells], topCellPercent)}")
- 
-    return cellThreshold
+    logger.debug(f"Top cell UMI value {topCellCount}")
+    return threshold
 
 
 def generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample):
@@ -379,9 +336,6 @@ def generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample):
 
         header = f_raw_mtx.readline().strip() # datatype header
         f_raw_mtx.readline(); f_raw_mtx.readline() # Skip extra header lines
-        
-        for i in range(3):
-            f_raw_mtx.readline()
 
         # Set current barcode to 0 to ensure that the first time we
         # compare current_barcode to the barcode received from
@@ -436,38 +390,22 @@ def generateFilteredMatrix(sampleSpecificFilePaths, allCells, sample):
         print(e, file=sys.stderr)
     
 
-def addStatsAndCallCells(sampleSpecificFilePaths,
-                         cells, star_cells, expectedCells,
-                         topCellPercent, minCellRatio, minReads,
-                         barnyardCounts, useSTARthreshold):
+def cellStats(sampleSpecificFilePaths:Dict[str, Path], barnyardCounts:pd.DataFrame, isBarnyard):
     """
-    Function to read in cellstats and initialize dataframe
+    Function to read in cellstats and initialize cell metrics dataframe
 
     Args:
-        sampleSpecificFilePaths (dict): Dictionary where key is placeholder for
-            a STAR output file name and value is path to the file
-        cells (int): User set threshold
-        star_cells (int): Estimated number of cells computed by STAR
-        expectedCells (int): Cell thresholding parameter
-        topCellPercent (int): Cell thresholding parameter
-        minCellRatio (int): Cell thresholding parameter
-        minReads (int): Cell thresholding parameter
-        barnyardCounts (pd.DataFrame): Dataframe with mouse and human information
-        useSTARthreshold (bool): Whether to use star thresholding or not
+        sampleSpecificFilePaths: STAR output files indexed by name
+        barnyardCounts: Dataframe with per-species counts (for barnyard exp. only)
 
     Returns:
-        allCells, cellThreshold, cells
+        dataframe with metrics per cell
     """
     cellReadStats = pd.read_csv(sampleSpecificFilePaths['cellReadsFn'], sep='\t', index_col='CB')
     cellReadStats = cellReadStats[1:]
     allCells = pd.DataFrame(index=cellReadStats.index.to_list())
-    
-    if barnyardCounts is None:
-        # If this is not a barnyard, we are taking gene and UMI counts from the STAR Cell stats
-        # otherwise we computed from from the .mtx earlier
-        allCells['genes'] = cellReadStats.nGenesUnique + cellReadStats.nGenesMulti
-        allCells['umis'] = cellReadStats.nUMIunique + cellReadStats.nUMImulti
-    else:
+
+    if isBarnyard:
         # For a barnyard, we only consider genes from the main species per cell-barcode
         # (not the background from the other species)
         allCells['humanGenes'] = barnyardCounts["humanGenes"]
@@ -476,6 +414,11 @@ def addStatsAndCallCells(sampleSpecificFilePaths,
         allCells['mouseUmis'] = barnyardCounts["mouseUmis"]
         allCells['genes'] = barnyardCounts[["humanGenes", "mouseGenes"]].max(1)
         allCells['umis'] = barnyardCounts[["humanUmis", "mouseUmis"]].max(1)
+        
+    else:
+        # If this is not a barnyard we use values computed from from the .mtx earlier
+        allCells['genes'] = barnyardCounts["genes"]
+        allCells['umis'] = barnyardCounts["umis"]
 
     allCells['reads'] = cellReadStats.cbMatch
     allCells['mappedReads'] = cellReadStats.genomeU + cellReadStats.genomeM
@@ -487,58 +430,74 @@ def addStatsAndCallCells(sampleSpecificFilePaths,
     allCells['uniquePassingReads'] = cellReadStats.countedU
     allCells['Saturation'] = 1 - (cellReadStats.nUMIunique / cellReadStats.countedU)
     allCells['mitoReads'] = cellReadStats.mito
+    return allCells
 
 
-    allCells.sort_values('umis', ascending=False, inplace=True)
+def callCells(allCells:pd.DataFrame, starStats:Dict|None, minReads:int, cells:int|None, expectedCells:int, topCellPercent:float|None, 
+              minCellRatio:float|None):
+    """
+    Calculate the UMI threshold for passing cells and add 'pass' value to cells dataframe
 
-    if useSTARthreshold or cells:
-        cellThreshold, cells = getCellThreshold(cells, allCells, star_cells)
-    else:
-        cellThreshold = calculateCustomCellThreshold(allCells, expectedCells, topCellPercent, minCellRatio, minReads)
+    Args:
+        allCells: Per-cell metrics
+        starStats: STAR summary metrics (if using STAR threshold)
+        minReads: Minimum number of reads for any cell to possibly 'pass'
+        cells: Pre-defined number of cells to pass (or 0 for dynamic threshold)
+        expectedCells: Rough estimate of cells in this dataset (or 0 to use all cells >= minReads
+        topCellPercent: Cell thresholding parameter
+        minCellRatio: Cell thresholding parameter
+    """
     
-    allCells['pass'] = allCells.umis >= cellThreshold
+    allCells.sort_values('umis', ascending=False, inplace=True)
+    cellThreshold = minReads
+    if starStats and not cells:
+        cells = int(starStats["Estimated Number of Cells"])
+        logger.debug(f"Passing cells from STAR {cells}")
+    if cells:
+        k = len(allCells.umis) - cells - 1
+        cellThreshold = max(cellThreshold, np.partition(allCells.umis, k)[k])
+        logger.debug(f"Fixed cell threshold {cellThreshold}")
+    else:
+        if topCellPercent is None or minCellRatio is None:
+            raise ValueError("Need cell threshold parameters to compute a dynamic threshold")
+        cellThreshold = calculateCustomCellThreshold(allCells, expectedCells, topCellPercent, minCellRatio, minReads)
+        logger.debug(f"Dynamic cell threshold {cellThreshold}")
 
-    return allCells, cells
+    allCells['pass'] = allCells.umis >= cellThreshold
+    logger.debug(f"Passing cells {allCells['pass'].sum()}")
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sample", type=str,
                         help="The name of the sample for which a report is being generated")
-    parser.add_argument("--samplesheet", type=str,
-                        help="Path to the samples.csv containing information about libName")
-    parser.add_argument("--libJsonName", type=str)
+    parser.add_argument("--libStruct", type=Path)
     parser.add_argument("--starFeature", default="GeneFull_Ex50pAS", type=str,
                         help="STARSolo feature type used")
     parser.add_argument("--starMatrix", default="matrix.mtx", type=str,
                         help="STARSolo gene expression matrix file to use")
-    parser.add_argument("--cells", default=None, type=int,
-                        help="Set a fixed number of cells to pass for UMI count threshold")
-    parser.add_argument("--star_out", type=str,
+    parser.add_argument("--star_out", type=Path,
                         help="STAR solo output file", required=True)
-    parser.add_argument("--libraryStructPath", type=str,
-                        help="Path to folder containing library files")
-    parser.add_argument("--cellThreshold", type=int)
-    parser.add_argument("--topCellPercent", type=int)
-    parser.add_argument("--minCellRatio", type=int)
-    parser.add_argument("--minReads", type=int)
+
+    parser.add_argument("--minReads", type=int, default=100,
+                        help="Minimum number of UMIs to consider a cell(-barcode)")
+    parser.add_argument("--cells", type=int,
+                        help="Set a fixed number of cells to pass for UMI count threshold")
+    parser.add_argument("--calcCellThreshold", action="store_true",
+                        help="Compute a heuristic cell threshold based on parameters below")
+    parser.add_argument("--topCellPercent", type=int, help="Cell threshold parameter")
+    parser.add_argument("--minCellRatio", type=int, help="Cell threshold parameter")
+    parser.add_argument("--expectedCells", type=int, help="Number of cells expected in data")
+
     parser.add_argument("--isBarnyard", default=False, action="store_true")
-    parser.add_argument("--useSTARthreshold", action="store_true")
+    parser.add_argument("--isMerge", default=False, action="store_true")
     
     args = parser.parse_args()
 
-    demuxJson = GeneralUtils.readJSON("demuxMetrics.json")
-
-    sampleSheetDf = pd.read_csv(args.samplesheet)
-
-    if 'expectedCells' in sampleSheetDf.columns:
-        expectedCells = int(sampleSheetDf.loc[sampleSheetDf['sample'] == args.sample]['expectedCells'])
-    else:
-        expectedCells = 0
-    
-    sample_metric(args.sample, demuxJson, Path(args.libraryStructPath), args.libJsonName,
-                  Path(args.star_out), args.starFeature, args.starMatrix,
-                  args.useSTARthreshold, args.isBarnyard, args.cells, expectedCells,
-                  args.topCellPercent, args.minCellRatio, args.minReads)
+    sample_metric(args.sample, args.libStruct,
+                  args.star_out, args.starFeature, args.starMatrix,
+                  args.isBarnyard, args.minReads, args.calcCellThreshold, args.cells, args.expectedCells,
+                  args.topCellPercent, args.minCellRatio, args.isMerge)
 
 if __name__ == "__main__":
     main()

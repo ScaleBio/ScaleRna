@@ -12,5 +12,8 @@ fastqDir : "s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/"
 samples : ${projectDir}/docs/examples/samples.csv
 
 #### Reference information
+### Version of the Scale Single Cell RNA assay used: "libV1.json" or "libV1.1.json"
+libStructure : libV1.json
+
 ### Path to a .json file defining the reference genome
 genome : ${projectDir}/docs/examples/genome.json

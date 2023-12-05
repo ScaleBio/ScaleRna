@@ -43,19 +43,8 @@ def concat_sample_metrics(sample_metrics, libName):
 
     # Metrics will be written to the library_metrics folder
     metricsDir = Path(".", f"library_{libName}_metrics")
-
     metricsDir.mkdir()
-
-    # Assumption: There will always be a sample_metrics1 folder
-    # Demux jsons are same for the same library so copying from folder1
-    # is equivalent to copying from folder2, etc
-    if os.path.isdir("sample_metrics1"):
-        shutil.copyfile(f"sample_metrics1/demuxJson.json", f"{metricsDir}/demuxJson.json")
-    else:
-        shutil.copyfile(f"sample_metrics/demuxJson.json", f"{metricsDir}/demuxJson.json")
-    
     logger.debug(f"Writing allCellsBetweenFiles to {str(metricsDir.resolve())}")
-
     frame.to_csv(f"{metricsDir}/allCellsBetweenFiles.csv")
 
 def main():

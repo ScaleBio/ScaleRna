@@ -1,9 +1,9 @@
-# ScaleBio scRNA Workflow
+# ScaleBio Seq Suite: RNA Workflow
 
-This is a Nextflow workflow to run analysis of ScaleBio single-cell RNA sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-count matrix, etc.), and QC reports.
+This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-expression matrix, etc.), and QC reports.
 
 ## Getting started
-* First install [Nextflow](http://www.nextflow.io) (22.04 or later)
+* First install [Nextflow](http://www.nextflow.io) (22.10 or later)
 * Download this workflow to your machine
 * Install [dependencies](docs/dependencies.md)
 * Launch the small pipeline [test run](#workflow-test)
@@ -12,45 +12,64 @@ This is a Nextflow workflow to run analysis of ScaleBio single-cell RNA sequenci
 * Create [runParams.yml](docs/analysisParameters.md), specifying inputs and analysis options for your run
 * Launch the workflow for your run
 
-## Inputs
+## Requirements
+* Linux system with GLIBC >= 2.17 (such as CentOS 7 or later)
+* Java 11 or later
+* 64GB of RAM and 12 CPU cores
+    * Smaller datasets can be run with 32GB of RAM and 6 CPUs
+
+## Required Inputs
 * Sequencing reads
-    * Path to the Illumina Sequencer RunFolder (bcl files)
-    * If you prefer to start from fastq files, generated outside (before) this workflow, see [Fastq generation](docs/fastqGeneration.md).
+    * Path to the Illumina sequencer RunFolder (bcl files)
+    * To instead start the workflow from fastq files, generated outside (before) this workflow, see [Fastq generation](docs/fastqGeneration.md).
 * Sample Table
-    * A .csv file listing all samples in the analysis, optionally split by RT barcode. See [samples.csv](docs/samplesCsv.md).
+    * A .csv file listing all samples for this analysis run, optionally split by RT barcode. See [samples.csv](docs/samplesCsv.md).
 * Reference Genome
     * The workflow requires a reference genome, including a [STAR](https://github.com/alexdobin/STAR) index for alignment, and gene annotation. See [Reference Genomes](docs/genomes.md)
+* Kit version / Library structure
+    * Select the `libStructure` corresponding to the version of the ScaleBio RNA kit used. See [Analysis Parameters](docs/analysisParameters.md#kit-version)
 
 ## Outputs
 The workflow produces per-sample and per-library QC reports (`html`), alignments (`bam`), a cell-by-gene count-matrix (`mtx`) and more; See [Outputs](docs/outputs.md) for a full list.
 
-
 ## Workflow Execution
 ### Workflow test
-A small test run, with all input data stored online or in this repository, can be run with the following command. Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a real assay: 
+A small test run, with all input data stored online, can be run with the following command:
 
 `nextflow run /PATH/TO/ScaleRna -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --outDir output`
 
 See [dependencies](docs/dependencies.md) for the best `PROFILE` to use on your system.
 
-Note that this run will automatically download the example data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
+(Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a real assay) 
+
+
+With this command, nextflow will automatically download the example data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs
-aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome
+aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome --no-sign-request
 ```
 and then run with
 ```
-nextflow run /PATH/TO/ScaleRna/ -profile docker,singularity --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
+nextflow run /PATH/TO/ScaleRna/ -profile PROFILE --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
 ```
 
 ### Nextflow Command-line
-**Note** that `nextflow` options are given with a single `-` (e.g. `-profile`), while workflow parameters (e.g. `--outDir`) are given with a double dash `--`.
+`nextflow` options are given with a single `-` (e.g. `-profile`), while workflow parameters (e.g. `--outDir`) are given with a double dash `--`. See the [Nextflow command-line documentation](https://www.nextflow.io/docs/latest/cli.html) for further details.
 
-See the [Nextflow command-line documentation](https://www.nextflow.io/docs/latest/cli.html) for the options to run `nextflow` on different systems (including HPC clusters and cloud compute).
+An example command to run the workflow on new data would then be:
+
+```
+nextflow run /PATH/TO/ScaleRna/ -profile docker --samples samples.csv --genome /PATH/TO/GRCh38/grch38.json --runFolder /PATH/TO/230830_A00525_1087_BHLFF3DSX7/ --outDir outDir
+```
+
+For large runs (e.g. NovaSeq runs), setting `--splitFastq` increases the amount of parallelization, which can significantly reduce analysis time. See [Analysis Parameters](docs/analysisParameters.md#parallel-execution)
+
+## Extended Throughput Kit
+To merge data from multiple final distribution plates, see [i5 Plates](docs/i5Plates.md)
 
 ## Configuration
 ### Specifying Analysis Parameters
-Analysis parameters (inputs, options, etc.) can be defined either in a [runParams.yml](docs/examples/runParams.yml) file or directly on the nextflow command-line. See [analysisParameters](docs/analysisParameters.md) for details on the options.
+Analysis parameters (inputs, options, etc.) can be defined either in a [runParams.yml](docs/examples/runParams.yml) file or directly on the nextflow command-line. See [Analysis Parameters](docs/analysisParameters.md) for details on the options.
 
 ### Config File
 In addition to the analysis parameters, a user-specific nextflow configuration file can be used for system settings (compute and storage resources, resource limits, storage paths, etc.):

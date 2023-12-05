@@ -1,0 +1,19 @@
+{
+"linkers": [
+    {"read": "read1", "start_min": 8, "start_max": 9, "name": "splint", "sequence":"TCAGAGC"}
+],
+"barcodes" : [
+    {"read": "read1", "start": 0, "length": 9, "name": "lig", "sequences": "3lvlRNA_lig.txt", "level":2, "alias":"Ligation"},
+    {"read": "read1", "anchor": "splint", "offset": 15, "length": 10, "name": "rt", "sequences": "3lvlRNA_rt.txt", "level":1, "alias":"RT"},
+    {"read": "read1", "anchor": "splint", "offset": 7, "length": 8, "name": "umi", "type": "umi"},
+    {"read": "index2", "start": 0, "length": 10, "name": "pcr", "sequences": "3lvlRNA_pcr.txt", "level":3, "alias":"i5", "rev_comp": true}
+],
+"sample_barcode": "rt",
+"star_barcode_param": "--soloType CB_UMI_Simple --soloCBlen 29 --soloUMIstart 30 --soloUMIlen 8 --soloCBwhitelist None",
+"bcl_convert": {
+    "library_barcodes": "3lvlRNA_p7Pools.txt",
+    "index2Seqs": "3lvlRNA_pcr.txt",
+    "index2RevComp": true,
+    "split_on": "index2"
+}
+}
