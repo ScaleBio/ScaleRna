@@ -1,6 +1,7 @@
 # Version 1.4
 ## 1.4.0
 * Add support for RNA kit v1.1 (i5-indexed plates)
+    - `libStructure` argument is now required; "libV1.json" or "libV1.1.json"
 * Add support for Extended Throughput kit (multi-plate merging)
 * Add 'reporting workflow' to re-generate outputs from previous alignments
 * Change output file name and directory structure to support multiple per-library and merged outputs
