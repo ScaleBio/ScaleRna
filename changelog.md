@@ -1,6 +1,7 @@
 # Version 1.4
 ## 1.4.1
-* Update `datapane` version to 0.17 to remove access to ~/.config during report generation
+* Update `datapane` version to remove need to access users home dir.
+* Always output sequencing-depth intrapolation results as (rounded) integers
 
 ## 1.4.0
 * Add support for RNA kit v1.1 (i5-indexed plates)

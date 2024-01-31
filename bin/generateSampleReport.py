@@ -65,8 +65,8 @@ def buildSampleReport(writeDir: Path, sampleMetrics:Path, sampleId:str, internal
 
     logger.debug(f"Writing reportStatistics csv, report to {str(writeDir.resolve())}")
     complexity_stats = complexity_df.apply(lambda row:pd.Series({
-            'Metric': f"Median unique transcript counts at {row['x']} total reads per cell",
-            'Value': row["unique_read"],
+            'Metric': f"Median unique transcript counts at {intOrNan(row['x'])} total reads per cell",
+            'Value': f"{intOrNan(row['unique_read'])}",
             'Category': "Extrapolated Complexity"}), axis=1)
     statsDf = pd.concat([statsDf, complexity_stats], axis=0)
     statsDf.to_csv(writeDir / "csv"/ f"{sampleId}.reportStatistics.csv", index=False, header=False,
