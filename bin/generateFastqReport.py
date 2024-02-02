@@ -12,8 +12,8 @@ import datapane as dp
 import pandas as pd
 import plotly.express as px
 
-from utils import fileUtils, reportUtil, statsUtils
-from utils.base_logger import logger
+from scaleReportUtils import fileUtils, reportUtil, statsUtils
+from scaleReportUtils.base_logger import logger
 
 BARCODE_SHORTHAND_TO_NAME = {
     'drop': 'Droplet Barcodes', 'P7': 'P7 Barcodes',

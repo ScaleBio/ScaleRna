@@ -7,7 +7,7 @@ import pandas as pd
 import os
 import shutil
 from pathlib import Path
-from utils.base_logger import logger
+from scaleReportUtils.base_logger import logger
 
 def concat_sample_metrics(sample_metrics, libName):
     """
