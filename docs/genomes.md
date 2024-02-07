@@ -26,7 +26,7 @@ All transcripts in the _GTF_ file used to built the STAR index are included in t
 
 ## Pre-built genomes
 Pre-build reference genome for human and mouse are available for download:
-* Human: http://scale.pub.s3.amazonaws.com/genomes/rna/grch38.tgz
+* Human (GRCh38): http://scale.pub.s3.amazonaws.com/genomes/rna/grch38.tgz
 * Mouse: http://scale.pub.s3.amazonaws.com/genomes/rna/mm39.tgz
 * Human/Mouse Barnyard: http://scale.pub.s3.amazonaws.com/genomes/rna/grch38_mm39.tgz
 

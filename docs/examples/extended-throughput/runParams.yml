@@ -1,18 +1,21 @@
 ##### Required Analysis Parameters
-# See "nextflow.config" for all options and defaults
+### See "nextflow.config" for all options and defaults
 
 ##### Inputs
 ### Sequencing data input can be either a Illumina sequencer RunFolder (bcl)
 # runFolder : 
 ### or a directory with fastq files
-fastqDir : "s3://scale.pub/testData/rna/202312_rnaV1.1/fastqs/"
+fastqDir : "s3://scale.pub/testData/rna/202312_extendedThroughput/fastqs"
 
-### A file listing all samples in the analysis with their RT barcodes and optional library information
-samples : ${projectDir}/docs/examples/samples.csv
+### A file listing all samples in the analysis with their RT barcodes and library information
+samples : ${projectDir}/docs/examples/extended-throughput/samples.ext.csv
+
 
 #### Reference information
 ### Version of the Scale Single Cell RNA assay used: "libV1.json" or "libV1.1.json"
 libStructure : libV1.1.json
+
+merge: true
 
 ### Path to a .json file defining the reference genome
 genome : ${projectDir}/docs/examples/genome.json

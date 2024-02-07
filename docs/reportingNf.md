@@ -1,23 +1,23 @@
-# Reporting-only workflow
+# Reporting-only Workflow
 
-A separate subworkflow, `reporting`, is included to run the downstream steps of the workflow, after alignment and quantification (after _STARsolo_). This includes
+A separate sub-workflow, `reporting`, is included to run only the QC and reporting steps of the workflow, after alignment and quantification (i.e. after _STARsolo_). This includes
 * Cell filtering (UMI threshold)
 * Sample metric and report generation
+* Library metric and report generation
 
-This sub-workflow can be used to regenerate reports and filtered outputs after adjusting parameters without re-running alignment.
+This sub-workflow can be used to regenerate outputs after adjusting parameters, without re-running alignment. It is also used to combine (merge) results from multiple different extended throughput plates (libraries), sequenced on different sequencing runs; see [extendedThroughput](extendedThroughput.md).
 
 ## Usage
-The workflow can be started by running `nextflow run /PATH/TO/ScaleRna -profile ... --genome ... --samples samples.csv --reporting --resultDir <OutDir from previous pipeline run>
+The reporting sub-workflow can be started by running
 
-Where `samples.csv` includes a `resultDir` column, giving the base output directory from the preivous pipeline run for that sample. E.g.
+`nextflow run /PATH/TO/ScaleRna -profile ... --genome ... --samples samples.csv --reporting --resultDir <outDir from previous workflow run>`
 
-| sample | resultDir |
-| pbmc1 | /PATH/TO/RUN1/ScaleRna.out |
-| pbmc2 | /PATH/TO/RUN2/ScaleRna.out |
+where `samples.csv` and `genome` should be the same files as used in the previous (alignment) run of the workflow.
+
 
 ## Inputs
-The `reporting` workflow will read the (raw) *STARSolo* output from the previous pipeline run specified in `resultDir`. Specifically, `resultDir/alignment/<sample>.<libName>.star.solo`
-It  also reads reference information from the `genome.json` and `library.json`
+The `reporting` workflow will read the (raw) _STARsolo_ output from the previous workflow run specified in `resultDir`; Specifically, `resultDir/alignment/<sample>.<libName>.star.solo`
+It also reads reference information from the `genome.json` and `library.json`
 
 ## Outputs
 The `reporting` workflow produces
@@ -26,5 +26,17 @@ The `reporting` workflow produces
 * New per-sample QC reports (`reports/<sample>/<sample>.<libName>.report.html`)
   - And `.csv` metric files
 
-## Parameters
-`--merge` Flag the determines wether or not to merge `<sample>.<libName>` libraries?
+Currently the reporting sub-workflow does not aggregate read-trimming statistics from the original run, so the _Total Sample Reads_ (pre-trimming) and _Average Trimmed Read Length_ metrics will be missing from the re-generated reports.
+
+## Combining Analysis Runs
+The reporting sub-workflow can be used to combine results from multiple analysis workflow runs. To do this, multiple paths to previous workflow outputs can be specified in a `resultDir` column in `samples.csv`, instead of the `--resultDir` command-line option:
+
+| sample | resultDir |
+|--------|----------------------------|
+| pbmc1  | /PATH/TO/RUN1/ScaleRna.out |
+| pbmc2  | /PATH/TO/RUN2/ScaleRna.out |
+
+See [samples.ext-merge.csv](examples/extended-throughput/samples.ext-merge.csv) for a complete example combining cells from multiple extended throughput plates. Set `--merge` to combine results from different libraries for the same sample.
+
+*Note* that this function only combines cells or samples from different runs, not reads for the same set of cells. Hence it cannot be used to combine two sequencing runs of the same library (multiple sets of reads for the same cells). Those need to be combined at the fastq level and go through alignment together in order to detect duplicate reads across fastq files.
+
