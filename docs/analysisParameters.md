@@ -39,10 +39,10 @@ See [nextflow.config](../nextflow.config) for a list of all available parameters
 Setting `bamOut` to false will suppress alignment (.bam file) output from STAR. Gene expression results (.mtx), and all other workflow outputs, are still generated of course.
 If the user does not specifically need alignments for custom downstream analysis, disabling BAM output will save compute time and storage space.
 
-### Parallel Execution
-The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. Based on what type of input is provided, the workflow has two different modes of parallelism:
-* *RunFolder*: Samples are split by PCR barcode in the `bcl-convert` step. These 96 fastq files (per library/lane) are processed separately through barcode parsing, trimming and alignment.
-* *Fastq*: Each set of input fastq files (e.g. by lane) is processed separately through barcode parsing. During that step, samples are split further based on the RT barcode. Each resulting file subset goes through trimming and alignment in parallel.
+### Parallel Execution for Large Datasets
+The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. This is generally recommended for large datasets, e.g. full NovaSeq runs. Based on what type of input is provided, the workflow has two different modes of parallelism:
+* *RunFolder*: The workflow automatically splits the data into 96 fastq files (one per PCR barcode), which are processed in parallel.
+* *Fastq*: Each set of input fastq files (_R1_, _R2_,_I1_) is processed through barcode parsing in parallel. Hence it is important to have multiple input fastq files for better parallelism, e.g. one set of files per lane or per ScaleBio PCR index. After barcode parsing, the workflow continues parallelized by RT barcode.
 
 Split samples are merged after alignment (gene expression matrix, metric files, etc.).
 

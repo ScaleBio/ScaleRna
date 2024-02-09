@@ -1,4 +1,9 @@
 # Version 1.4
+## 1.4.1
+* Update `datapane` version to remove need to access users home dir.
+* Always output sequencing-depth intrapolation results as (rounded) integers
+* Update workflow test dataset to RNA kit v1.1
+
 ## 1.4.0
 * Add support for RNA kit v1.1 (i5-indexed plates)
     - `libStructure` argument is now required; "libV1.json" or "libV1.1.json"

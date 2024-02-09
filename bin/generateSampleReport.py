@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 
-from utils import fileUtils, reportUtil, statsUtils
-from utils.base_logger import logger
+from scaleReportUtils import fileUtils, reportUtil, statsUtils
+from scaleReportUtils.base_logger import logger
 
 
 def buildSampleReport(writeDir: Path, sampleMetrics:Path, sampleId:str, internalReport:bool, isBarnyard:bool, libStructJson:Path, trim_stats:List[Path],
@@ -65,8 +65,8 @@ def buildSampleReport(writeDir: Path, sampleMetrics:Path, sampleId:str, internal
 
     logger.debug(f"Writing reportStatistics csv, report to {str(writeDir.resolve())}")
     complexity_stats = complexity_df.apply(lambda row:pd.Series({
-            'Metric': f"Median unique transcript counts at {row['x']} total reads per cell",
-            'Value': row["unique_read"],
+            'Metric': f"Median unique transcript counts at {intOrNan(row['x'])} total reads per cell",
+            'Value': f"{intOrNan(row['unique_read'])}",
             'Category': "Extrapolated Complexity"}), axis=1)
     statsDf = pd.concat([statsDf, complexity_stats], axis=0)
     statsDf.to_csv(writeDir / "csv"/ f"{sampleId}.reportStatistics.csv", index=False, header=False,

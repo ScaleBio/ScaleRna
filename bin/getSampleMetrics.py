@@ -16,8 +16,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from utils.base_logger import logger
-from utils import fileUtils, statsUtils
+from scaleReportUtils.base_logger import logger
+from scaleReportUtils import fileUtils, statsUtils
 
 @dataclass
 class CellStat:
