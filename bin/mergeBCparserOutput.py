@@ -20,13 +20,14 @@ def load_json(fname):
     with open(fname) as f:
         return json.load(f)
 
-def merge(bc_jsons, lib_json):
+def merge(bc_jsons, lib_json, libName):
     """
     Function to merge multiple demuxMetrics.json files
 
     Args:
         bc_jsons (list): List of demuxMetrics.json files
         lib_json (str): Path to library json file
+        libName (str): Name of the library
     
     Output:
         Writes combined demuxMetrics.json to cwd
@@ -116,7 +117,7 @@ def merge(bc_jsons, lib_json):
                 master_dict["samples"][sample_name][key] = [summation_metrics[sample_name][key],
                                                             f"{round(100*(int(summation_metrics[sample_name][key])/total_reads), 1)}%"]
 
-    with open('metrics.json', "w") as f:
+    with open(f'{libName}.metrics.json', "w") as f:
         json.dump(master_dict, f)
 
 
@@ -128,9 +129,11 @@ def main():
                         required=True)
     parser.add_argument("--lib_json", type=str, help="Path to library json file",
                         required=True)
+    parser.add_argument("--libName", type=str, help="Name of the library to be used in the output file name",
+                        required=True)
     args = parser.parse_args()
     
-    merge(args.bc_jsons, args.lib_json)
+    merge(args.bc_jsons, args.lib_json, args.libName)
 
 
 if __name__ == "__main__":

@@ -42,7 +42,8 @@ input:
     tuple(val(sample), path("Solo.out*"))
 output:
     tuple(val(sample), path(outDir), emit: merge)
-label "mergeRawStarOutput"
+label "report"
+tag "$sample"
 publishDir "$params.outDir/alignment/", mode:'copy'
 script:
 	outDir = "${sample}/${sample}.star.solo"

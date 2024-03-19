@@ -12,8 +12,8 @@ import datapane as dp
 import pandas as pd
 import plotly.express as px
 
-from scaleReportUtils import fileUtils, reportUtil, statsUtils
-from scaleReportUtils.base_logger import logger
+from scale_utils import reporting
+from scale_utils.base_logger import logger
 
 BARCODE_SHORTHAND_TO_NAME = {
     'drop': 'Droplet Barcodes', 'P7': 'P7 Barcodes',
@@ -31,6 +31,12 @@ def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path,
         internalReport: Flag denoting whether report is for internal purposes'
     """
     allCellsBetweenFiles = pd.read_csv(libMetrics / "allCellsBetweenFiles.csv", index_col=0)
+    # Within each sample sort by umis
+    allCellsBetweenFiles.sort_values(by=["sample", "umis"], ascending=False, inplace=True)
+    # Set index to reflect the rank based on umi sorted order
+    # cumcount() returns the number of occurrences of each value up to that point
+    # So each sample will have an index range starting at zero to the number of barcodes - 1 in that sample
+    allCellsBetweenFiles.set_index(allCellsBetweenFiles.groupby("sample").cumcount(), inplace=True)
     demuxMetrics = json.load(open(demuxJson))
     libStruct = json.load(open(libJson))
     
@@ -102,9 +108,9 @@ def buildDfForPlatePlot(allCellsBetweenFiles:pd.DataFrame, libJson:Path, bcName:
     alias = bcInfo.get('alias') or bcInfo['name']
     barcode_list = allCellsBetweenFiles[alias].to_list()
     well_list = [wells[x] for x in barcode_list]
-    max_letter, max_number = reportUtil.getMaxWellNumberAndLetter(libStructDir / f'{bcInfo["sequences"]}')
+    max_letter, max_number = reporting.getMaxWellNumberAndLetter(libStructDir / f'{bcInfo["sequences"]}')
     allCellsBetweenFiles[f'{alias.lower()}_well'] = well_list
-    well_df = pd.DataFrame(0, columns=range(1, max_number+1), index=reportUtil.getCharacterIndices(65, ord(max_letter)+1))
+    well_df = pd.DataFrame(0, columns=range(1, max_number+1), index=reporting.getCharacterIndices(65, ord(max_letter)+1))
     
     for well in set(well_list):
         letter = well[-1]
@@ -137,17 +143,17 @@ def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, allCellsBetween
     ligation_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "lig")
     ligation_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_ligation_well.csv")
     # Matplotlib figure that represents umi count per well for ligation
-    ligationPerWell = reportUtil.buildPlatePlot(ligation_well_df, "Ligation Plate", 10000.0, "Unique Transcript Counts")
+    ligationPerWell = reporting.buildPlatePlot(ligation_well_df, "Ligation Plate", 10000.0, "Unique Transcript Counts")
 
     pcr_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "pcr")
     pcr_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_pcr_well.csv")
     # Matplotlib figure that represents umi count per well for pcr
-    pcrPerWell = reportUtil.buildPlatePlot(pcr_well_df, "PCR Plate", 10000.0, "Unique Transcript Counts")
+    pcrPerWell = reporting.buildPlatePlot(pcr_well_df, "PCR Plate", 10000.0, "Unique Transcript Counts")
     
     rt_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "rt")
     rt_well_df.to_csv(writeDir / "csv"/ f"library_{libName}_unique_reads_rt_well.csv")
     # Matplotlib figure that represents umi count per well for rt
-    readPerWell = reportUtil.buildPlatePlot(rt_well_df, "RT Plate", 10000.0, "Unique Transcript Counts")
+    readPerWell = reporting.buildPlatePlot(rt_well_df, "RT Plate", 10000.0, "Unique Transcript Counts")
 
     blocks = [dp.Text(f"## libName: {libName}"),
               readPerWell, ligationPerWell, pcrPerWell]
@@ -181,8 +187,8 @@ def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Path):
     allBarcodes = list(barcodesDf['Barcode'].unique())
     for bc in allBarcodes:
         subset = barcodesDf[barcodesDf['Barcode'] == bc][['Match', 'Reads']]
-        styledDf = subset.style.pipe(reportUtil.styleTable, title=f"{getBarcodeAlias(libStruct, bc)} Barcodes")
-        table = reportUtil.mkTable(styledDf)
+        styledDf = subset.style.pipe(reporting.styleTable, title=f"{getBarcodeAlias(libStruct, bc)} Barcodes")
+        table = reporting.make_table(styledDf)
         tableGroup.append(table)
     return (barcodesDf, dp.Group(blocks=tableGroup, columns=2))
 
@@ -210,7 +216,7 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     barcodeReadsTotal.rename(columns={'Type': 'Status'}, inplace=True)
     barcodeReadsTotal['Percent'] = barcodeReadsPerc['Reads']
     
-    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(reportUtil.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(reporting.styleTable, title="Barcode Read Status", numericCols=['Reads'])
 
     total_reads = 0
     total_percent = 0
@@ -220,15 +226,15 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
         total_percent += float(row["Percent"][:-1])
     df_pass = barcodeReadsTotal[barcodeReadsTotal["Status"].str.contains("Pass")]
     df_pass.loc[len(df_pass.index)] = ['Error', total_reads, str(round(total_percent, 1))+"%"]
-    barcodeReadsTotalStyled = df_pass.style.pipe(reportUtil.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    barcodeReadsTotalStyled = df_pass.style.pipe(reporting.styleTable, title="Barcode Read Status", numericCols=['Reads'])
     
-    barcodeReadStats = reportUtil.mkTable(barcodeReadsTotalStyled)
-    barcodeReadStatsInternal = reportUtil.mkTable(barcodeReadsTotalStyledInternal)
+    barcodeReadStats = reporting.make_table(barcodeReadsTotalStyled)
+    barcodeReadStatsInternal = reporting.make_table(barcodeReadsTotalStyledInternal)
 
     (countsPerSampleDf, rtCountsPerSampleDf) = buildDfFromDemuxSampleMetrics(demuxJson)
     
     wellOrder = sorted(list(rtCountsPerSampleDf['rtWell'].unique()),
-                       key=functools.cmp_to_key(reportUtil.wellStringComp))
+                       key=functools.cmp_to_key(reporting.wellStringComp))
     rtCountsPerSampleDf['rtWell'] = pd.Categorical(rtCountsPerSampleDf['rtWell'], wellOrder)
     rtCountsPerSampleDf.sort_values(by=['rtWell'], inplace=True, ascending=False)
 
@@ -247,7 +253,7 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     readsPerSample = px.bar(
         countsPerSampleDf, x='Sample', y='TotalReads', color='Sample',
         height=900, color_discrete_map=colorMap,
-        template=reportUtil.DEFAULT_FIGURE_STYLE,
+        template=reporting.DEFAULT_FIGURE_STYLE,
         title="Reads Per Sample", labels={"TotalReads": "Total Reads"})
     readsPerSample.update_layout(showlegend=False)
 
@@ -317,10 +323,10 @@ def makeMultisampleKneePlot(allCellsBetweenFiles):
         dp.Plot object and dataframe with data from all samples
     """
     maxIndex = max(allCellsBetweenFiles.index) if len(allCellsBetweenFiles.index) else 0
-    indices = set(reportUtil.sparseLogCoords(maxIndex))
+    indices = set(reporting.sparseLogCoords(maxIndex))
     plottingDf = allCellsBetweenFiles[allCellsBetweenFiles.index.isin(indices)]
     fig = px.line(plottingDf, x=plottingDf.index, y='umis', color='sample', log_x=True, log_y=True,
-                  template=reportUtil.DEFAULT_FIGURE_STYLE, labels={"index": "Cell Barcodes", "umis": "Unique Transcript Counts"})
+                  template=reporting.DEFAULT_FIGURE_STYLE, labels={"index": "Cell Barcodes", "umis": "Unique Transcript Counts"})
     return dp.Plot(fig), allCellsBetweenFiles
 
 

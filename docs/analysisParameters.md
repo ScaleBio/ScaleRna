@@ -1,6 +1,6 @@
 # Analysis parameters
 
-All analysis parameters can be set in a `runParams.yml` file, which is then passed to nextflow with `nextflow run -params-file runParams.yml`. 
+All analysis parameters can be set in a [runParams.yml](../docs/examples/runParams.yml) file, which is then passed to nextflow with `nextflow run -params-file runParams.yml`. 
 Alternatively each option is this file can also be set on the nextflow command-line directly, overwriting the value in the parameter file. E.g.
 `nextflow run --samples=samples.foo.csv`
 
@@ -40,9 +40,10 @@ Setting `bamOut` to false will suppress alignment (.bam file) output from STAR. 
 If the user does not specifically need alignments for custom downstream analysis, disabling BAM output will save compute time and storage space.
 
 ### Parallel Execution for Large Datasets
-The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. This is generally recommended for large datasets, e.g. full NovaSeq runs. Based on what type of input is provided, the workflow has two different modes of parallelism:
-* *RunFolder*: The workflow automatically splits the data into 96 fastq files (one per PCR barcode), which are processed in parallel.
-* *Fastq*: Each set of input fastq files (_R1_, _R2_,_I1_) is processed through barcode parsing in parallel. Hence it is important to have multiple input fastq files for better parallelism, e.g. one set of files per lane or per ScaleBio PCR index. After barcode parsing, the workflow continues parallelized by RT barcode.
+The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. This is generally recommended for large datasets, e.g. full NovaSeq runs. Parallelization is implemented at two different stages of the workflow's execution:
+* *RunFolder*: The workflow automatically splits the data into 96 fastq files (one per PCR barcode).
+* *Fastq*: These set of 96 fastq files are then collected into n number of groups, where n is defined by the bcParserJobs parameter in nextflow.config. Each of these groups contain sets of fastq files (_R1_, _R2_,_I1_) that are processed through barcode parsing in parallel. After barcode parsing, the workflow continues parallelized by RT barcode.
+If starting from fastq files, the workflow will still attempt to group the input fastq files into n groups, so it is important to have multiple input fastq files for better parallelism, e.g. one set of files per lane or per ScaleBio PCR index.
 
 Split samples are merged after alignment (gene expression matrix, metric files, etc.).
 

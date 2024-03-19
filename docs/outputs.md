@@ -9,7 +9,7 @@ For detailed information about the library and sample level QC reports see [qcRe
 | `reports`| `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastQC and trimming |
 | | `allSamples.reportStatistics.csv` | QC metrics from all samples in this analysis in one table
 | | `<sample>.<libName>.report.html` | A standalone report including key QC metrics and figures for each sample |
-| | `<sample>.merged.report.html` | For extended throughput runs, a merged report for each sample across all plates, when running with `--merge`|
+| | `<sample>.merged.report.html` | For extended throughput runs, a merged report for each sample across all libraries / plates |
 | | `<sample>_libraries` | For extended throughput runs, individual sample reports for each plate
 | | `csv/` | Summary and QC metrics for this sample in csv format |
 | `reports/library` | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library (potentially multiple samples) |

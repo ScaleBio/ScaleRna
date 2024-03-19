@@ -133,6 +133,8 @@ def main(samplesCsv:Path, splitFastq:bool, reporting:bool, resultDir:Optional[st
             for r in rows:
                 if r[barcodesIndex].strip() == "":
                     r[barcodesIndex]="1A-12H"
+                else:
+                    r[barcodesIndex] = r[barcodesIndex].replace(" ", "")
         if splitFastq:
             if "split" not in cols:
                 cols.append("split")

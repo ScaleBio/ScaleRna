@@ -1,7 +1,7 @@
 # ScaleBio RNA QC reports
 
 ## Library report
-The file called _library_<LibraryName>.report.html_ contains the summary report at the library level, i.e. sequencing, barcode and demultiplexing information for all samples processed in one run of the ScaleRNA kit.
+The file called _library_<LibraryName>_.report.html_ contains the summary report at the library level, i.e. sequencing, barcode and demultiplexing information for all samples processed in one run of the ScaleRNA kit.
 
 ### Barcode Read Status
 This table gives the barcode matching statistics for the full library. Reads that fail barcode matching are not assigned to any sample and are hence not included in any downstream analysis or metrics.
@@ -44,7 +44,7 @@ The files called _<SampleName>.report.html_ contain the summary report for a sin
 
 ### Plots
 #### Barcode Rank plot
-This shows the unique transcript counts for each cell-barcode, sorted from high to low. The _Unique Transcript Counts Threshold_ is indicated by a dashed line, separating (estimated) cells from background barcodes.
+This shows the unique transcript counts for each barcode, sorted from high to low. When using Cell Finder cell calling, the points are colored by the proportion of called cells. This proportion is a rolling average of the proportion of called cells, calculated using a window size of 25. Otherwise when cell calling is performed using a _Unique Transcript Counts Threshold_ this threshold is indicated by a dashed line, separating (estimated) cells from background barcodes.
 
 #### Complexity plot
 This shows a statistical estimate for the unique transcript counts that would be observed at different shallower sequencing levels.

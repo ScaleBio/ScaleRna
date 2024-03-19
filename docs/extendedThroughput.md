@@ -10,8 +10,8 @@ If all plates are sequenced together in the same run, this can be done in one ne
     * List each sample on each plate (repeating the `sample` name for each plate used)
     * Set the `libIndex` column to the name of the barcode pool (e.g. `RNA-A-AP1`)
     * See [samples.ext.csv](examples/extended-throughput/samples.ext.csv) for an example with two samples on two plates
-* Launch the workflow with the `--merge` option
-    * This will produce outputs for each individual plate as well as merged outputs, combining all cells for each sample across all plates
+* Launch the workflow
+    * This will produce outputs for each individual plate as well as merged outputs (with default `merge` set), combining all cells for each sample across all plates
 
 A small test-case can be run with: \
 `nextflow run /PATH/TO/ScaleRna -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/extended-throughput/runParams.yml --outDir output.ext`
@@ -24,9 +24,8 @@ If plates were sequenced on separate sequencing runs, each plate can first be an
 * Create another `samples.csv` that lists all samples and plates to be merged
     * Add a new `resultDir` column that points to the workflow output directories for the individual plate runs
     * See [samples.ext-merge.csv](examples/extended-throughput/samples.ext-merge.csv)
-* Run the workflow with the `--reporting` and `--merge` option
+* Run the workflow with the `--reporting` option
     * `--reporting` uses the previous alignment results instead of re-processing all reads
-    * `--merge` creates merged outputs for each sample across all plates as before
     * Do not specify any input reads at this step (no `--runFolder` or `--fastqDir`)
 
 ## Fastq Generation

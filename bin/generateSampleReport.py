@@ -12,74 +12,80 @@ from typing import Dict,List
 import datapane as dp
 import numpy as np
 import pandas as pd
+from plotly.graph_objects import Figure
 import plotly.express as px
 
-from scaleReportUtils import fileUtils, reportUtil, statsUtils
-from scaleReportUtils.base_logger import logger
+from scale_utils import reporting
+from scale_utils.base_logger import logger
+import re
 
 
-def buildSampleReport(writeDir: Path, sampleMetrics:Path, sampleId:str, internalReport:bool, isBarnyard:bool, libStructJson:Path, trim_stats:List[Path],
-                      metadata:Dict[str,str]):
+def build_sample_report(write_dir: Path, sample_metrics: Path, sample_id: str, internal_report: bool, is_barnyard: bool,
+                        lib_struct_json: Path, trim_stats: List[Path], metadata:Dict[str, str]):
     """
     Entry function for building sample report
 
     Args:
-        writeDir: Report Output directory
-        sampleMetrics: Folder containing csv files defining the metrics for a single sample
-        sampleId: Unique Sample ID (e.g. `SampleNam.LibName`)
-        internalReport: Additional plots for internal QC
-        isBarnyard: Add barnyard plots and metrics
-        libStructJson: Library structure json (in directory with sequence files, etc.)
+        write_dir: Report Output directory
+        sample_metrics: Folder containing csv files defining the metrics for a single sample
+        sample_id: Unique Sample ID (e.g. `SampleNam.LibName`)
+        internal_report: Create additional plots for internal QC
+        is_barnyard: Add barnyard plots and metrics
+        lib_struct_json: Library structure json (in directory with sequence files, etc.)
         trim_stats: json files containing cutadapt output
+        metadata: Information about the sample and analysis run [FieldName -> Value]
     """
-    allCells = pd.read_csv(sampleMetrics / "allCells.csv", index_col=0)
+    all_cells = pd.read_csv(sample_metrics / "allCells.csv", index_col=0)
+    sample_stats = pd.read_csv(sample_metrics / "sample_stats.csv", index_col=['Category', 'Metric'])
     filtered_short_reads, avg_trimmed_length = get_trim_stats_metrics(trim_stats)
 
-    Path(writeDir, "csv").mkdir(parents=True, exist_ok=True)
-    if internalReport or isBarnyard:
-        Path(writeDir, f"{sampleId}_figures").mkdir()
+    Path(write_dir, "csv").mkdir(parents=True, exist_ok=True)
+    if internal_report:
+        Path(write_dir, "figures_internal").mkdir()
     
-    libStructDir = libStructJson.parent
-    libStruct = json.load(open(libStructJson))
+    lib_struct_dir = lib_struct_json.parent
+    lib_struct = json.load(open(lib_struct_json))
 
     pages = []
-    readsPage, statsDf, complexity_df, internalReportBlocks = \
-        buildReadsPage(sampleId, allCells, writeDir, internalReport, filtered_short_reads, avg_trimmed_length, metadata)
-    pages.append(readsPage)
+    reads_page, report_stats, internal_report_blocks = \
+        build_reads_page(sample_id, all_cells, sample_stats, write_dir, internal_report,
+                         filtered_short_reads, avg_trimmed_length, metadata)
+    pages.append(reads_page)
 
-    allIndexPlots, barcodesPage = buildBarcodesPage(libStruct, libStructDir, allCells, writeDir, sampleId, internalReport)
-    pages.append(barcodesPage)
+    all_index_plots, barcodes_page = build_barcodes_page(lib_struct, lib_struct_dir, all_cells, write_dir,
+                                                         sample_id, internal_report)
+    pages.append(barcodes_page)
     
-    if internalReport:
-        internalReportBlocks.extend([allIndexPlots["lig"], allIndexPlots["pcr"]])
-        internalReportPage = dp.Page(dp.Group(blocks=internalReportBlocks, columns=2), title="InternalReport")
-        pages.append(internalReportPage)
+    if internal_report:
+        internal_report_blocks.extend([all_index_plots["lig"], all_index_plots["pcr"]])
+        internal_report_page = dp.Page(dp.Group(blocks=internal_report_blocks, columns=2), title="InternalReport")
+        pages.append(internal_report_page)
     
-    if isBarnyard:
-        scoreBarn(allCells)
-        (barnyardPage, barnyardStat) = buildBarnyardPage(allCells, writeDir, sampleId)
-        statsDf = pd.concat([statsDf, barnyardStat])
-        pages.append(barnyardPage)
+    if is_barnyard:
+        score_barn(all_cells, sample_stats)
+        barnyard_stats = make_barnyard_stats(all_cells)
+        barnyard_page = build_barnyard_page(all_cells, barnyard_stats, write_dir, sample_id, internal_report)
+        report_stats = pd.concat([report_stats, barnyard_stats])
+        pages.append(barnyard_page)
 
     report = dp.Report(blocks=pages)
 
-    logger.debug(f"Writing reportStatistics csv, report to {str(writeDir.resolve())}")
-    complexity_stats = complexity_df.apply(lambda row:pd.Series({
-            'Metric': f"Median unique transcript counts at {intOrNan(row['x'])} total reads per cell",
-            'Value': f"{intOrNan(row['unique_read'])}",
-            'Category': "Extrapolated Complexity"}), axis=1)
-    statsDf = pd.concat([statsDf, complexity_stats], axis=0)
-    statsDf.to_csv(writeDir / "csv"/ f"{sampleId}.reportStatistics.csv", index=False, header=False,
-                   columns=["Category", "Metric", "Value"])
+    logger.debug(f"Writing reportStatistics csv, report to {str(write_dir.resolve())}")
+    # Change 'nan' back to np.nan in Value column
+    report_stats.replace('nan', np.nan, inplace=True)
+    report_stats.to_csv(write_dir / "csv"/ f"{sample_id}.reportStatistics.csv",
+                        index=False, header=False, na_rep='', # can change na_rep to '<NA>' or similar if needed
+                        columns=["Category", "Metric", "Value"])
 
-    report.save(writeDir / f"{sampleId}.report.html")
+    report.save(write_dir / f"{sample_id}.report.html")
 
-def get_trim_stats_metrics(trim_stats):
+
+def get_trim_stats_metrics(trim_stats: list) -> tuple[float, float]:
     """
     Parse cutadapt output and aggregate metrics
 
     Args:
-        trim_stats (list): Path to trim stats json
+        trim_stats: List of paths to trim stats json
     
     Returns:
         Number of filtered short reads and average trimmed read-length
@@ -100,107 +106,102 @@ def get_trim_stats_metrics(trim_stats):
     return filtered_short_reads, average_trimmed_length
 
 
-def getBackground(minorFracs):
+def get_background(minor_fracs: list) -> tuple[float, float]:
     """
     Calculate median and standard deviation for barnyard cells
 
     Args:
-        minorFracs (list): List with fraction indicating percentage
+        minor_fracs: List with fraction indicating percentage
             of human or mouse samples in a cell
 
     Returns:
         Median and standard deviation
     """
-    if minorFracs.size == 0:
+    if minor_fracs.size == 0:
         return np.nan, np.nan
-    median = minorFracs.median()
-    std = (np.quantile(minorFracs, 0.75) - median) / 0.675
+    median = minor_fracs.median()
+    std = (np.quantile(minor_fracs, 0.75) - median) / 0.675
     return median, std
 
 
-def scoreBarn(allCells):
+def score_barn(all_cells: pd.DataFrame, sample_stats: pd.DataFrame):
     """
     Label each cell as belonging to either human or mouse
 
     Args:
-        allCells (pd.DataFrame): Dataframe with all the data for this sample
+        all_cells: Barcode dataframe for this sample
+        sample_stats: Sample-level statistics
     """
-    cells = allCells
-    cells['species'] = "None"
-    cells['minorFrac'] = cells[['humanUmis', 'mouseUmis']].min(1) / cells[['humanUmis', 'mouseUmis']].sum(1)
-    cells.loc[cells['pass'] & (cells.humanUmis > cells.mouseUmis), 'species'] = 'Human'
-    cells.loc[cells['pass'] & (cells.mouseUmis > cells.humanUmis), 'species'] = 'Mouse'
+    all_cells['species'] = 'None'
+    all_cells['minor_frac'] = all_cells[['human_umis', 'mouse_umis']].min(axis=1) / all_cells[['human_umis', 'mouse_umis']].sum(axis=1)
+    all_cells.loc[all_cells['pass'] & (all_cells.human_umis > all_cells.mouse_umis), 'species'] = 'Human'
+    all_cells.loc[all_cells['pass'] & (all_cells.mouse_umis > all_cells.human_umis), 'species'] = 'Mouse'
 
-    minHuman = minMouse = cells[cells['pass']].umis.min()
-    if (cells.species == 'Human').any() and (cells.species == 'Mouse').any():
-        minHuman = np.percentile(cells.humanUmis[cells.species == 'Human'], 10)
-        minMouse = np.percentile(cells.mouseUmis[cells.species == 'Mouse'], 10)
+    min_human = min_mouse = sample_stats.loc[('Cells', 'utc_threshold')].Value
+    if (all_cells.species == 'Human').any() and (all_cells.species == 'Mouse').any():
+        min_human = np.percentile(all_cells.human_umis[all_cells.species == 'Human'], 10)
+        min_mouse = np.percentile(all_cells.mouse_umis[all_cells.species == 'Mouse'], 10)
 
     # Labelling low and doublet cells
-    cells.loc[(cells.humanUmis < minHuman) & (cells.mouseUmis < minMouse), 'species'] = "None"
-    cells.loc[(cells.humanUmis >= minHuman) & (cells.mouseUmis >= minMouse), 'species'] = "Mixed"
+    all_cells.loc[(all_cells.human_umis < min_human) & (all_cells.mouse_umis < min_mouse), 'species'] = "None"
+    all_cells.loc[(all_cells.human_umis >= min_human) & (all_cells.mouse_umis >= min_mouse), 'species'] = "Mixed"
 
     # Labelling as Ambiguous
-    humanBackMed, humanBackStd = getBackground(cells[(cells.species == 'Mouse')].minorFrac)
-    mouseBackMed, mouseBackStd = getBackground(cells[(cells.species == 'Mouse')].minorFrac)
+    human_bg_med, human_bg_std = get_background(all_cells[(all_cells.species == 'Mouse')].minor_frac)
+    mouse_bg_med, mouse_bg_std = get_background(all_cells[(all_cells.species == 'Human')].minor_frac)
 
-    cells.loc[(cells.species == 'Mixed') & (cells.humanUmis > cells.mouseUmis) & (cells.minorFrac < mouseBackMed + 2 * mouseBackStd), 'species'] = 'Ambiguous'
-
-    cells.loc[(cells.species == 'Mixed') & (cells.mouseUmis > cells.humanUmis) & (cells.minorFrac < humanBackMed + 2 * humanBackStd), 'species'] = 'Ambiguous'
-
-    cells.loc[(cells.species == 'Human') & (cells.minorFrac >= max(0.1, mouseBackMed + 3 * mouseBackStd)), 'species'] = 'Ambiguous'
-
-    cells.loc[(cells.species == 'Mouse') & (cells.minorFrac >= max(0.1, humanBackMed + 3 * humanBackStd)), 'species'] = 'Ambiguous'
+    all_cells.loc[(all_cells.species == 'Mixed') & (all_cells.human_umis > all_cells.mouse_umis) & (all_cells.minor_frac < mouse_bg_med + 2 * mouse_bg_std), 'species'] = 'Ambiguous'
+    all_cells.loc[(all_cells.species == 'Mixed') & (all_cells.mouse_umis > all_cells.human_umis) & (all_cells.minor_frac < human_bg_med + 2 * human_bg_std), 'species'] = 'Ambiguous'
+    all_cells.loc[(all_cells.species == 'Human') & (all_cells.minor_frac >= max(0.1, mouse_bg_med + 3 * mouse_bg_std)), 'species'] = 'Ambiguous'
+    all_cells.loc[(all_cells.species == 'Mouse') & (all_cells.minor_frac >= max(0.1, human_bg_med + 3 * human_bg_std)), 'species'] = 'Ambiguous'
 
 
-def makeReadStatsDf(allCells:pd.DataFrame, filtered_short_reads:float):
+def make_read_stats(sample_stats: pd.DataFrame, filtered_short_reads: float):
     """
     Make dataframe depicting read stats that will be displayed in the sample report
 
     Args:
-        allCells: Per-cell metrics
+        sample_stats: Sample-level statistics
         filtered_short_reads: Number of filtered reads (or NaN)
     """
-    stats = []
-    totalReads = intOrNan(allCells['reads'].sum() + filtered_short_reads)
-    stats.append({'Category':'Reads', 'Metric': 'Total Sample Reads',
-                  'Value': totalReads if totalReads is not np.NaN else 'NA'})
-    stats.append({'Category':'Reads', 'Metric': 'Passing Sample Reads',
-                  'Value': intOrNan(allCells['reads'].sum())})
-    stats.append({'Category':'Reads', 'Metric': 'Reads Mapped to Genome',
-                  'Value': format(np.divide(allCells['mappedReads'].sum(), allCells['reads'].sum()), ".1%")})
-    stats.append({'Category':'Reads', 'Metric': 'Reads Mapped to Transcriptome',
-                  'Value': format(np.divide(allCells['geneReads'].sum(), allCells['mappedReads'].sum()), ".1%")})
-    stats.append({'Category':'Reads', 'Metric': 'Exonic Reads',
-                  'Value': format(np.divide(allCells['exonReads'].sum(), allCells['mappedReads'].sum()), ".1%")})
-    stats.append({'Category':'Reads', 'Metric': 'Antisense Reads',
-                  'Value': format(np.divide(allCells['antisenseReads'].sum(), allCells['mappedReads'].sum()), ".1%")})
-    stats.append({'Category':'Reads', 'Metric': 'Mitochondrial Reads',
-                  'Value': format(np.divide(allCells['mitoReads'].sum(), allCells['mappedReads'].sum()), ".1%")})
-    stats.append({'Category':'Reads', 'Metric': 'Saturation',
-                  'Value': format(1 - (np.divide(allCells.umis.sum(), allCells.passingReads.sum())), ".2f")})
-    return pd.DataFrame(stats)
+    totalReads = sample_stats.loc[('Reads', 'total_reads')].Value + filtered_short_reads
+    stats = [
+        ('Reads', 'Total Sample Reads', f"{totalReads:.0f}"),
+        ('Reads', 'Passing Sample Reads', f"{sample_stats.loc[('Reads', 'total_reads')].Value:.0f}"),
+        ('Reads', 'Reads Mapped to Genome', f"{sample_stats.loc[('Reads', 'mapped_reads_perc')].Value:.1%}"),
+        ('Reads', 'Reads Mapped to Transcriptome', f"{sample_stats.loc[('Reads', 'gene_reads_perc')].Value:.1%}"),
+        ('Reads', 'Exonic Reads', f"{sample_stats.loc[('Reads', 'exon_reads_perc')].Value:.1%}"),
+        ('Reads', 'Antisense Reads', f"{sample_stats.loc[('Reads', 'antisense_reads_perc')].Value:.1%}"),
+        ('Reads', 'Mitochondrial Reads', f"{sample_stats.loc[('Reads', 'mito_reads_perc')].Value:.1%}"),
+        ('Reads', 'Saturation', f"{sample_stats.loc[('Reads', 'saturation')].Value:.2f}")
+    ]
+    return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
 
-def makeExtraReadStatsDf(allCells, average_trimmed_length):
+
+def make_extra_read_stats(average_trimmed_length: float):
     """
     Create a dataframe with metrics included in .csv files, but not the HTML report tables
+    
+    Args:
+        average_trimmed_length: Average read length after trimming
     """
-    stats = []
-    stats.append({'Category':'Reads', 'Metric': 'Average Trimmed Read Length',
-                  'Value': format(average_trimmed_length, ".1f")})
-    return pd.DataFrame(stats)
+    stats = [
+        ('Reads', 'Average Trimmed Read Length', f"{average_trimmed_length:.1f}"),
+    ]
+    return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
 
-def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalReport:bool, filtered_short_reads:float, avg_trimmed_length:float,
-                   metadata:Dict[str,str]):
+
+def build_reads_page(sample: str, all_cells: pd.DataFrame, sample_stats: pd.DataFrame, write_dir: Path, internal_report: bool,
+                   filtered_short_reads: float, avg_trimmed_length: float, metadata:Dict[str, str]):
     """
-    Function to build a datapane page that mainly shows plots related
-    to reads
+    Build a datapane page that mainly shows plots related to reads
 
     Args:
         sample: Sample name
-        allCells: Per-cell metrics
-        writeDir: Output directory
-        internalReport: Flag indicating whether report is to be
+        all_cells: Per-cell metrics
+        sample_stats: Sample-level statistics
+        write_dir: Output directory
+        internal_report: Flag indicating whether report is to be
             generated for internal r&d run
         filtered_short_reads: Number of reads filtered out after trimming (or NaN)
         avg_trimmed_length: Average read length after trimming (or NaN)
@@ -210,308 +211,355 @@ def buildReadsPage(sample:str, allCells:pd.DataFrame, writeDir:Path, internalRep
         dp.Page object and concatenated dataframe of various statistics
         List of elements for the internal report (or empty)
     """
+    report_stats = pd.DataFrame({'Category': ['Sample'], 'Metric': ['SampleName'], 'Value': [sample]})
+    read_stats = make_read_stats(sample_stats, filtered_short_reads)
+    extra_stats = make_extra_read_stats(avg_trimmed_length)
+    cell_stats = make_cell_stats(sample_stats, is_cellfinder='FDR' in all_cells)
+    complexity_stats = make_complexity_stats(sample_stats)
+    report_stats = pd.concat([report_stats, read_stats, extra_stats, cell_stats, complexity_stats])
 
-    statsDf = pd.DataFrame({'Metric': ['SampleName'], 'Value': [sample]})
-    statsDf['Category'] = 'Sample'
-    readStatsDf = makeReadStatsDf(allCells, filtered_short_reads)
-    extraStatsDf = makeExtraReadStatsDf(allCells, avg_trimmed_length)
-    cellStatsDf = makeCellStatsDf(allCells)
-    statsDf = pd.concat([statsDf, readStatsDf, extraStatsDf, cellStatsDf])
+    info = pd.DataFrame.from_dict({'Metric':metadata.keys(), 'Value':metadata.values()})
+    info_table = reporting.create_metric_table(info, title="Sample Information")
+    cell_table = reporting.create_metric_table(cell_stats, title="Cell Metrics")
+    mapping_table = reporting.create_metric_table(read_stats, title="Read Metrics", rm_nan=True)
 
-    infoDf = pd.DataFrame.from_dict({'Metric':metadata.keys(), 'Value':metadata.values()})
-    infoTable = reportUtil.createMetricTable(infoDf, title="Sample Information")
-    cellTable = reportUtil.createMetricTable(cellStatsDf, title="Cell Metrics")
-    mappingTable = reportUtil.createMetricTable(readStatsDf, title="Read Metrics")
+    rank_plot = make_rank_plot(all_cells, write_dir, sample, internal_report)
+    unique_reads_fig = make_unique_reads_fig(sample_stats)
+    genes_umi_scatter = build_gene_read_scatter(all_cells)
+    saturation_scatter = build_saturation_scatter(all_cells)
+    group_blocks = [info_table, cell_table, mapping_table, rank_plot, unique_reads_fig, genes_umi_scatter, saturation_scatter]
+    page = dp.Page(dp.Group(blocks=group_blocks, columns=2), title="Summary")
 
-    rankPlot = makeRankPlot(allCells, writeDir, sample, internalReport)
-    uniqueReadsFig, complexity_df = makeUniqueReadsFig(allCells, internalReport)
-    genesVersusUMIsScatter = buildGeneXReadScatter(allCells)
-    saturationScatter = buildSaturationScatter(allCells)
-    groupBlocks = [infoTable, cellTable, mappingTable, rankPlot, uniqueReadsFig, genesVersusUMIsScatter, saturationScatter]
-    page = dp.Page(dp.Group(blocks=groupBlocks, columns=2), title="Summary")
+    internal_report_blocks = []
+    if internal_report:
+        gene_reads_dist = build_dist("Distribution of Reads: Gene Matched", 'geneReads', "Fraction of Genic Reads", all_cells)
+        antisense_reads_dist = build_dist("Distribution of Reads: Antisense", 'antisenseReads', "Fraction of Antisense Reads", all_cells)
+        exonic_reads_dist = build_dist("Distribution of Reads: Exonic", 'exonReads', "Fraction of Exonic Reads", all_cells)
+        internal_report_blocks.extend([gene_reads_dist, exonic_reads_dist, antisense_reads_dist])
 
-    internalReportBlocks = []
-    if internalReport:
-        allCells['geneReadsToMappedReads'] = allCells['geneReads'] / allCells['mappedReads']
-        allCells['antisenseReadsToMappedReads'] = allCells['antisenseReads'] / allCells['mappedReads']
-        allCells['exonReadsToMappedReads'] = allCells['exonReads'] / allCells['mappedReads']
-        geneReadsDist = buildDist("Distribution of Reads: Gene Matched", 'geneReadsToMappedReads', 'Fraction of Genic Reads', allCells)
-        antisenseReadsDist = buildDist("Distribution of Reads: Antisense", "antisenseReadsToMappedReads", "Fraction of Antisense Reads", allCells)
-        exonicReadsDist = buildDist("Distribution of Reads: Exonic", 'exonReadsToMappedReads', "Fraction of Exonic Reads", allCells)
-        internalReportBlocks.extend([geneReadsDist, exonicReadsDist, antisenseReadsDist])
+        if sample_stats.loc[('Cells', 'mito_reads')].Value != 0:
+            mito_reads_dist = build_dist("Distribution of Reads: Mitochondrial", 'mitoReads', "Fraction of Mitochondrial Reads", all_cells)
+            internal_report_blocks.append(mito_reads_dist)
 
-        anyNonZeroMitoReads = (allCells.loc[allCells['pass']].mitoReads > 0).any()
-        if anyNonZeroMitoReads:
-            allCells['mitoReadsToMappedReads'] = allCells['mitoReads'] / allCells['mappedReads']
-            mitoReadsDist = buildDist("Distribution of Reads: Mitochondrial", 'mitoReadsToMappedReads', "Fraction of Mitochondrial Reads", allCells)
-            internalReportBlocks.append(mitoReadsDist)
-
-    return page, statsDf, complexity_df, internalReportBlocks
+    return page, report_stats, internal_report_blocks
 
 
-def buildBarcodesPage(libStruct:Dict[str,str], libStructDir:Path, allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
+def build_barcodes_page(lib_struct: dict[str, str], lib_struct_dir: Path, all_cells: pd.DataFrame,
+                        write_dir: Path, sample_id: str, internal_report: bool) -> tuple[dict, dp.Page]:
     """
     Build datapane page for barcodes
 
     Args:
-        libStruct: Library structure definition
-        libStructDir: Directory with barcode sequences ec.
-        allCells: Metrics per cell-barcode
-        writeDir: Ouput directory
-        sampleId: Unique ID of this sample
-        internalReport: Extra plots for internal QC
+        lib_struct: Library structure definition
+        lib_struct_dir: Directory with barcode sequences ec.
+        all_cells: Metrics per cell-barcode
+        write_dir: Ouput directory
+        sample_id: Unique ID of this sample
+        internal_report: Extra plots for internal QC
 
     Returns:
-        allIndexPlots for internalReports (empty otherwise)
-        dp.Page object with shared figures figures
+        Index plots for internal reports (empty otherwise)
+        Page object with shared figures
     """
-    blocksToRender = []
-    allIndexPlots = createBarcodeLevelFigures(libStruct, libStructDir, allCells, writeDir, sampleId, internalReport)
-    blocksToRender.append(allIndexPlots["rt"])
-    return allIndexPlots, dp.Page(blocks=blocksToRender, title="Barcodes")
-
-
-def createBarcodeLevelFigures(libStruct:Dict, libStructDir:Path, allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
-    """
-    Create plots for the barcodes page
-
-    Args:
-        libStruct: Library structure definition
-        libStructDir: Directory with barcode sequences ec.
-        allCells: Metrics per cell-barcode
-        writeDir: Ouput directory
-        sampleId: Unique ID of this sample
-        internalReport: Extra plots for internal QC
-
-    Returns:
-        dp.Group object with the relevant figures
-    """
-    passingCells = allCells.loc[allCells['pass']] # .loc needed here to keep the column names if zero passing cells
-
-    allIndexPlots = {}
-    for bc in libStruct['barcodes']:
+    blocks_to_render = []
+    passing_cells = all_cells.loc[all_cells['pass']] # .loc needed here to keep the column names if zero passing cells
+    all_index_plots = {}
+    for bc in lib_struct['barcodes']:
         if bc.get('type') not in ['library_index', 'umi']:
             alias = bc.get('alias') or bc['name']
-            indexPlots = reportUtil.barcodeLevelPlots(
-                libStruct, libStructDir, sampleId, passingCells, f"{alias}_alias", 
-                f"{alias} Index", internalReport, writeDir)
-            allIndexPlots[bc['name']] = indexPlots
-    return allIndexPlots
+            index_plots = reporting.barcodeLevelPlots(
+                lib_struct, lib_struct_dir, sample_id, passing_cells, f"{alias}_alias", 
+                f"{alias} Index", internal_report, write_dir)
+            all_index_plots[bc['name']] = index_plots
+    blocks_to_render.append(all_index_plots["rt"])
+
+    return all_index_plots, dp.Page(blocks=blocks_to_render, title="Barcodes")
 
 
-def buildDist(title, field, replacementStr, allCells):
+def build_dist(title: str, field: str, label: str, all_cells: pd.DataFrame) -> dp.Plot:
     """
-    Build histogram
+    Build histogram for a given field divided by mapped reads
 
     Args:
-        title (str): Title of plot
-        field (str): Column name in @allCells to plot on x axis
-        replacementStr (str): String that will be the x axis label
-            instead of @field
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
+        title: Title of plot
+        field: Column name in all_cells to plot on x axis after dividing by mapped reads
+        label: String that will be the x axis label
+        all_cells: Cell-level metrics
 
     Returns:
-        dp.Plot object with the figure
+        Plot object with the figure
     """
-    passingCells = allCells.loc[allCells['pass']]
+    passing_cells = all_cells.loc[all_cells['pass']]
+    x = passing_cells[field] / passing_cells['mappedReads']
 
-    fig = px.histogram(passingCells, x=field, title=title, histnorm='percent',
-                       template=reportUtil.DEFAULT_FIGURE_STYLE, labels={field: replacementStr})
+    fig = px.histogram(x=x, title=title, histnorm='percent',
+                       template=reporting.DEFAULT_FIGURE_STYLE, labels={field: label})
 
     fig.update_layout(yaxis_title="% Cells")
 
     return dp.Plot(fig)
 
 
-def buildGeneXReadScatter(allCells):
+def subsample_all_cells(all_cells: pd.DataFrame) -> pd.DataFrame:
     """
-    Function to make a scatter plot of reads vs umi
+    Subsample allCells to a maximum of 5000 cells for plotting purposes
 
+    Too many cells results in overplotting so in this function we:
+        (1) Take all passing cells
+        (2) Take an equal number of the top failing cells by umis
+        (3) Return a maximum of 5000 cells by subsampling if necessary
+    
     Args:
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
+        all_cells: Cell-level metrics
 
     Returns:
-        dp.Plot object with the figure
+        Subsampled dataframe
     """
-    cellsToPlot = allCells[:allCells['pass'].sum()*2]
+    passing_cells = all_cells.loc[all_cells['pass']]
+    top_failed_cells = all_cells[~all_cells['pass']].sort_values(by='umis', ascending=False).head(passing_cells.shape[0])
+    top_cells = pd.concat([passing_cells, top_failed_cells])
+    if top_cells.shape[0] > 5000:
+        top_cells = top_cells.sample(5000)
+    return top_cells
 
-    if cellsToPlot.index.size > 5000:
-        cellsToPlot = cellsToPlot.sample(5000)
 
-    fig = px.scatter(cellsToPlot, x="reads", y="genes", color='pass', color_discrete_map=reportUtil.QC_COLORMAP, template=reportUtil.DEFAULT_FIGURE_STYLE,
-                     labels={"reads": "Total reads", "genes": "Genes detected"}, title="Genes Detected Per Cell")
+def build_gene_read_scatter(all_cells: pd.DataFrame)-> dp.Plot:
+    """
+    Make a scatter plot of reads vs umi
+
+    Args:
+        all_cells: Cell-level metrics
+
+    Returns:
+        Plot object with the figure
+    """
+    all_cells["plt_color"] = all_cells["pass"].map({True:"Cell", False:"Background"})
+    fig = px.scatter(subsample_all_cells(all_cells), x="reads", y="genes", color="plt_color",
+                     color_discrete_map=reporting.SCATTER_COLORMAP, template=reporting.DEFAULT_FIGURE_STYLE,
+                     labels={"reads": "Total reads", "genes": "Genes detected", "plt_color":""}, title="Genes Detected Per Cell",
+                     category_orders={"plt_color":["Cell", "Background"]}, opacity=0.5)
+    
 
     return dp.Plot(fig)
 
 
-def buildSaturationScatter(allCells):
+def build_saturation_scatter(all_cells: pd.DataFrame)-> dp.Plot:
     """
     Build scatter plot for saturation
 
     Args:
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
+        all_cells: Cell-level metrics
 
     Returns:
-        dp.Plot object with the figure
+        Plot object with the figure
     """
-    cellsToPlot = allCells[:allCells['pass'].sum()*2]
-    if cellsToPlot.index.size > 5000:
-        cellsToPlot = cellsToPlot.sample(5000)
-
-    fig = px.scatter(cellsToPlot, x="reads", y="Saturation", labels={"reads": "Total reads"}, template=reportUtil.DEFAULT_FIGURE_STYLE, color='pass',
-                     color_discrete_map=reportUtil.QC_COLORMAP, title="Saturation Per Cell", log_x=False)
+    all_cells["plt_color"] = all_cells["pass"].map({True:"Cell", False:"Background"})
+    fig = px.scatter(subsample_all_cells(all_cells), x="reads", y="Saturation", color = "plt_color",
+                     labels={"reads": "Total reads", "plt_color":""}, template=reporting.DEFAULT_FIGURE_STYLE,
+                     color_discrete_map=reporting.SCATTER_COLORMAP, title="Saturation Per Cell", log_x=False,
+                     category_orders={"plt_color":["Cell", "Background"]}, opacity=0.5)
 
     return dp.Plot(fig)
 
 
-def makeRankPlot(allCells:pd.DataFrame, writeDir:Path, sampleId:str, internalReport:bool):
+def make_rank_plot(all_cells: pd.DataFrame, write_dir: Path, sample_id: str, internal_report: bool) -> dp.Plot:
     """
-    Make a kneeplot using @field in @data; drawing a
-    vertical line at @threshold
+    Make barcode rank plot and draw vertical line at threshold if cellfinder was not used
+    
+    Args:
+        all_cells: Cell-level metrics
+        write_dir: Output directory
+        sample_id: Unique ID of this sample
+        internal_report: Extra plots for internal QC
+
+    Returns:
+        Plot object with the figure
     """
-    indices = reportUtil.sparseLogCoords(allCells.index.size)
-    fig = px.line(allCells.iloc[indices], x=indices, y="umis", labels={"x": "Cell barcodes", "umis": "Unique transcript counts"},
-                  log_x=True, log_y=True, template=reportUtil.DEFAULT_FIGURE_STYLE, title="Barcode Rank Plot")
-    fig.add_vline(x=max(1, allCells['pass'].sum()), line_dash="dash", line_color="green")
+    # If FDR is a column in all_cells then cellfinder was used for cell calling (No transcript count threshold).
+    is_cellFinder = 'FDR' in all_cells
+    indices = reporting.sparseLogCoords(all_cells.index.size)
+    all_cells = all_cells.sort_values(by=["umis"], ascending=False)
+    if is_cellFinder:
+        #Calculate proportion of cells with a moving window of 10.
+        #min_periods=1 allows us to calculate proportion of windows with less than 10 barcodes.
+        #This prevents nans.
+        all_cells['z'] = all_cells['pass'].rolling(25, min_periods=1).mean()
+        #Color plot using new classification and update category orders to fix overplotting.
+        all_cells = all_cells.iloc[indices]
+        all_cells["x_val"] = indices
+        fig = px.scatter(all_cells, x="x_val", y="umis", color = "z", 
+                      labels={"x_val":"Cell barcodes", "umis": "Unique transcript counts", "cell": "Cell Barcode", "z": "Prop. Cells"},
+                      log_x=True, log_y=True, template=reporting.DEFAULT_FIGURE_STYLE, title="Barcode Rank Plot", opacity=.5, color_continuous_scale=['rgb(178, 181, 187)', 'rgb(39, 139, 176)'],
+                      hover_data={"umis":True, "z":True, "x_val":False})
+        fig.update_layout(coloraxis_colorbar = dict(thickness=10, tickvals=[0,1], ticktext=["Background", "Cell"], len=.25, y = .75, title_text = ""))
+    else:
+        all_cells["plt_color"] = all_cells["pass"].map({True:"Cell", False:"Background"})
+        fig = px.scatter(all_cells.iloc[indices], x=indices, y="umis", color = "plt_color", labels={"x": "Cell barcodes", "umis": "Unique transcript counts", "plt_color":""},
+                      log_x=True, log_y=True, template=reporting.DEFAULT_FIGURE_STYLE, title="Barcode Rank Plot", color_discrete_map=reporting.SCATTER_COLORMAP, category_orders={"plt_color":["Cell", "Background"]}, opacity=0.5,
+                      hover_data={"plt_color":False})
+    # If cellfinder was not used for cell calling. Add UTC threshold to plot.
+    if not is_cellFinder:
+        fig.add_vline(x=max(1, all_cells['pass'].sum()), line_dash="dash", line_color="green")
     if indices.size > 0:
         fig.update_layout(xaxis_range=[1, np.log10(max(indices)+1)])
-    if internalReport:
-        saveFigureAsPng(writeDir, sampleId, fig, "BarcodeRankPlot.png")
+    if internal_report:
+        save_figure_png(write_dir, sample_id, fig, "BarcodeRankPlot.png")
     return dp.Plot(fig)
 
-
-def saveFigureAsPng(writeDir:Path, sampleId:str, fig, pngName: str):
+def save_figure_png(write_dir: Path, sample_id: str, fig: Figure, fname: str):
     """
     Save a plotly figure object as png
+    
+    Args:
+        write_dir: Output directory
+        sample_id: Unique ID of this sample
+        fig: Plotly figure object
+        fname: Name of the file to save
     """
-    fig.write_image(writeDir / f"{sampleId}_figures" / pngName)
+    fig.write_image(write_dir / "figures_internal" / f"{sample_id}_{fname}")
 
-
-def buildBarnyardPage(allCells:pd.DataFrame, writeDir:Path, sampleId:str) -> tuple[dp.Page, pd.DataFrame]:
+def build_barnyard_page(all_cells: pd.DataFrame, barnyard_stats: pd.DataFrame, write_dir: Path, sample_id: str, internal_report: bool) -> dp.Page:
     """
-    Build a datapane page and metrics datagrame for barnyard analysis
+    Build a datapane page for barnyard analysis
+    
+    Args:
+        all_cells: Cell-level metrics
+        barnyard_stats: Barnyard statistics
+        write_dir: Output directory
+        sample_id: Unique ID of this sample
+        internal_report: Figures to be published as png for internal QC
+        
+    Returns:
+        Page object with the relevant figures
     """
-    barnyardStatsDf = makeBarnyardStatsDf(allCells)
-    barnyardStatsTable = reportUtil.createMetricTable(barnyardStatsDf, title="")
-    barnyardPlot = makeBarnyardScatterPlot(allCells, writeDir, sampleId)
-    plotGroup = dp.Group(barnyardStatsTable, barnyardPlot, columns=2)
-    return (dp.Page(plotGroup, title="Barnyard"), barnyardStatsDf)
+    barnyard_table = reporting.create_metric_table(barnyard_stats, title="")
+    barnyard_plot = make_barnyard_scatter_plot(all_cells, write_dir, sample_id, internal_report)
+    plot_group = dp.Group(barnyard_table, barnyard_plot, columns=2)
+    return dp.Page(plot_group, title="Barnyard")
 
-
-def makeBarnyardScatterPlot(allCells:pd.DataFrame, writeDir:Path, sampleId:str):
+def make_barnyard_scatter_plot(all_cells: pd.DataFrame, write_dir: Path, sample_id: str, internal_report: bool) -> dp.Plot:
     """
     Scatter plot transcript count per species for all cells
-    """
-    cellsToPlot = allCells[:allCells['pass'].sum()*2]
-    if cellsToPlot.index.size > 5000:
-        cellsToPlot = cellsToPlot.sample(5000)
+    
+    Args:
+        all_cells: Cell-level metrics
+        write_dir: Output directory
+        sample_id: Unique ID of this sample
+        internal_report: Figures to be published as png for internal QC
 
-    fig = px.scatter(cellsToPlot, x="humanUmis", y="mouseUmis", color="species", log_x=True, log_y=True, template=reportUtil.DEFAULT_FIGURE_STYLE,
-                     color_discrete_map=reportUtil.BARNYARD_COLORMAP, labels={"humanUmis": "Human UMIs", "mouseUmis": "Mouse UMIs"})
+    Returns:
+        Plot object with the figure
+    """
+    fig = px.scatter(subsample_all_cells(all_cells),
+                     x="human_umis", y="mouse_umis", color="species",
+                     log_x=True, log_y=True, template=reporting.DEFAULT_FIGURE_STYLE,
+                     color_discrete_map=reporting.BARNYARD_COLORMAP,
+                     labels={"human_umis": "Human UMIs", "mouse_umis": "Mouse UMIs"})
 
     fig.update_traces(selector=dict(name='None'), visible="legendonly")
-    saveFigureAsPng(writeDir, sampleId, fig, "Barnyard_ScatterPlot.png")
+    if internal_report:
+        save_figure_png(write_dir, sample_id, fig, "Barnyard_ScatterPlot.png")
 
     return dp.Plot(fig)
 
-
-def makeBarnyardStatsDf(allCells: pd.DataFrame) -> pd.DataFrame:
+def make_barnyard_stats(all_cells: pd.DataFrame) -> pd.DataFrame:
     """
     Compute statistics for barnyard samples
-    """
-    passingBarnyardCells = allCells.loc[(allCells['pass']) & (~allCells.species.isin(['Ambiguous', 'None']))]
-    ncells = max(1, passingBarnyardCells.index.size)
-
-    stats = []
-    propHuman = (passingBarnyardCells.species == 'Human').sum() / ncells
-    stats.append(['Human Cells', f"{propHuman:.1%}"])
-    propMouse = (passingBarnyardCells.species == 'Mouse').sum() / ncells
-    stats.append(['Mouse Cells', f"{propMouse:.1%}"])
-    propMixed = (passingBarnyardCells.species == 'Mixed').sum() / ncells
-    stats.append(['Mixed Cells', f"{propMixed:.1%}"])
-    doublets = propMixed/(2*propHuman*propMouse) if propHuman > 0 and propMouse > 0 else 0
-    stats.append(['Estimated Doublets', f"{min(1, doublets):.1%}"])
-    stats.append(['Background', f"{passingBarnyardCells[passingBarnyardCells.species != 'Mixed'].minorFrac.median():.2%}"])
-
-    result = pd.DataFrame(stats, columns=['Metric', 'Value'])
-    result['Category'] = 'Barnyard'
-    return result
-
-
-def makeUniqueReadsFig(allCells, extrapolate_upwards=False):
-    """
-    Estimate number of unique transcript counts (unique reads / UMIs)
-    at different sequencing depths
-
-    The plot includes a point for the observed values in this sample (not extrapolated)
-    but this is excluded from the returned dataframe (For statistics.csv output)
-
+    
     Args:
-        allCells (pd.DataFrame): Dataframe containing all data for this sample
-        extrapolate_upwards: If true, estimate complexity at depth higher than actuallt sequenced 
-            (which is generally less accurate)
+        all_cells: Cell-level metrics
 
     Returns:
-        dp.Plot object with the figure and dataframe with estimates
+        Sample-level barnyard statistics
     """
-    passingCells = allCells.loc[allCells['pass']]
-    mean_reads = passingCells.reads.mean()
-    median_reads = passingCells.passingReads.median()
-    median_unique = passingCells.umis.median()
+    passing_barnyard_cells = all_cells.loc[(all_cells['pass']) & (~all_cells.species.isin(['Ambiguous', 'None']))]
+    ncells = max(1, passing_barnyard_cells.index.size)
+    prop_human = (passing_barnyard_cells.species == 'Human').sum() / ncells
+    prop_mouse = (passing_barnyard_cells.species == 'Mouse').sum() / ncells
+    prop_mixed = (passing_barnyard_cells.species == 'Mixed').sum() / ncells
+    doublets = prop_mixed/(2*prop_human*prop_mouse) if prop_human > 0 and prop_mouse > 0 else 0
+    doublets = min(1, doublets)
+    bg = passing_barnyard_cells[passing_barnyard_cells.species != 'Mixed'].minor_frac.median()
+
+    stats = [
+        ('Barnyard', 'Human Cells', f"{prop_human:.1%}"),
+        ('Barnyard', 'Mouse Cells', f"{prop_mouse:.1%}"), 
+        ('Barnyard', 'Mixed Cells', f"{prop_mixed:.1%}"), 
+        ('Barnyard', 'Estimated Doublets', f"{doublets:.1%}"),
+        ('Barnyard', 'Background', f"{bg:.2%}"),
+    ]
+    return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
+
+def make_unique_reads_fig(sample_stats: pd.DataFrame)-> dp.Plot:
+    """
+    Create plot for estimate of unique transcript counts at different sequencing depths
+
+    The plot includes a point for the observed values in this sample (not extrapolated)
+    but this is excluded from the dataframe (For statistics.csv output)
+
+    Args:
+        sample_stats: Sample-level statistics
+
+    Returns:
+        Plot object with the figure
+    """
+    # Add estimated unique reads at different sequencing depths
+    target_mean_reads = [(
+                int(re.match(r'^target_reads_(\d+)', name).group(1)),
+                row['Value']
+            ) for name, row in sample_stats.loc['Extrapolated Complexity'].iterrows()]
     
-    unique_reads = []
-    target_mean_reads = [100, 500, 1000, 5000, 10000, 20000]
-    for d in target_mean_reads:
-        if d < mean_reads or extrapolate_upwards:
-            # Target reads refers to the mean reads per cell, but we are estimating
-            # UMIs / complexity in the median cell. Approx. scaling median reads by the same
-            # factor as mean reads.
-            target_median_reads = (d/mean_reads) * median_reads
-            unique_reads.append(statsUtils.extrapolate_unique(median_reads, median_unique, target_median_reads))
-        else:
-            unique_reads.append(np.nan)
-    
-    plot_df = pd.DataFrame(dict(x=target_mean_reads + [mean_reads], unique_read=unique_reads + [median_unique]))
-    
+    # Add the observed value to the plot
+    target_mean_reads.append((sample_stats.loc[('Cells', 'mean_passing_reads')].Value,
+                              sample_stats.loc[('Cells', 'median_utc')].Value))
+
+    plot_df = pd.DataFrame.from_records(target_mean_reads, columns=['x', 'unique_read'])
     plot_df.sort_values(by='x', inplace=True) 
+
     fig = px.line(plot_df, x="x", y="unique_read",
                   labels={"x": "Total reads per cell",
                           "unique_read": "Median unique transcript counts (extrapolated)"},
-                  template=reportUtil.DEFAULT_FIGURE_STYLE, markers=True,
+                  template=reporting.DEFAULT_FIGURE_STYLE, markers=True,
                   title="Complexity")
 
-    stats_df = pd.DataFrame(dict(x=target_mean_reads, unique_read=unique_reads))
-    return dp.Plot(fig), stats_df
+    return dp.Plot(fig)
 
 
-def makeCellStatsDf(allCells: pd.DataFrame) -> pd.DataFrame:
+def make_cell_stats(sample_stats: pd.DataFrame, is_cellfinder: bool) -> pd.DataFrame:
     """
     Make dataframe of summary stats
 
     Args:
-        allCells: Per-cell metrics
+        sample_stats: Sample-level statistics
+        is_cellfinder: Was cellfinder used for cell calling?
     """
-    passingCells = allCells.loc[allCells['pass']]
-    stats = []
-    stats.append(['Unique Transcript Counts Threshold', passingCells.umis.min()])
-    stats.append(['Cells above Threshold', passingCells.index.size])
-    stats.append(["Mean Passing Reads per Cell", intOrNan(passingCells.reads.mean())])
-    stats.append(["Median Unique Transcript Counts per Cell", intOrNan(passingCells.umis.median())])
-    stats.append(["Median Genes per Cell", intOrNan(passingCells.genes.median())])
-    stats.append(["Reads in Cells", f"{np.divide(passingCells.passingReads.sum(), allCells.passingReads.sum()):.1%}"])
-
-    statsDataFrame = pd.DataFrame(stats, columns=["Metric","Value"])
-    statsDataFrame['Category'] = 'Cells'
-    return statsDataFrame
+    stats = [
+        ('Cells', 'Cells Called', f"{sample_stats.loc[('Cells', 'cells_called')].Value:.0f}"),
+        ('Cells', 'Mean Passing Reads per Cell', f"{sample_stats.loc[('Cells', 'mean_passing_reads')].Value:.0f}"),
+        ('Cells', 'Median Unique Transcript Counts per Cell', f"{sample_stats.loc[('Cells', 'median_utc')].Value:.0f}"),
+        ('Cells', 'Median Genes per Cell', f"{sample_stats.loc[('Cells', 'median_genes')].Value:.0f}"),
+        ('Cells', 'Reads in Cells', f"{sample_stats.loc[('Cells', 'reads_in_cells')].Value:.1%}"),
+    ]
+    if not is_cellfinder:
+        stats.insert(1, ('Cells', 'Unique Transcript Counts Threshold', f"{sample_stats.loc[('Cells', 'utc_threshold')].Value:.0f}"))
+    return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
 
 
-def intOrNan(x: int|float|None) -> int|float:
+def make_complexity_stats(sample_stats: pd.DataFrame) -> pd.DataFrame:
     """
-    NaN if @x is NaN or None, else int(x)
+    Make dataframe of extrapolated complexity stats
+
+    Args:
+        sample_stats: Sample-level statistics
     """
-    if x is None or np.isnan(x):
-        return np.nan
-    return int(x)
+    pattern = r'^target_reads_(\d+)'
+    stats = [(
+                "Extrapolated Complexity",
+                f"Median unique transcript counts at {re.match(pattern, name).group(1)} total reads per cell",
+                f"{row['Value']:.0f}"
+            ) for name, row in sample_stats.loc['Extrapolated Complexity'].iterrows()]
+    return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -536,7 +584,7 @@ def main():
         'Analysis Date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
         'Library Structure': args.libraryStruct.stem,
     }
-    buildSampleReport(args.outDir, args.sampleMetrics, args.sampleId, args.internalReport, args.isBarnyard, args.libraryStruct, args.trim_stats, metadata)
+    build_sample_report(args.outDir, args.sampleMetrics, args.sampleId, args.internalReport, args.isBarnyard, args.libraryStruct, args.trim_stats, metadata)
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-# Utilities related to QC report generation
+"""Utilities related to QC report generation"""
 
 import functools
 import operator
@@ -23,6 +23,7 @@ SAMPLING_NUMBER = 4000
 
 # Color mapping used for qc filter categorized scatter plots
 QC_COLORMAP = {True: 'rgb(39, 139, 176)', False: 'rgb(233, 237, 245)'}
+SCATTER_COLORMAP = {"Cell": 'rgb(39, 139, 176)', "Background": 'rgb(178, 181, 187)'}
 
 # Color mapping used for barnyard species categorization scatter plots
 # (human and mouse hardcoded as it is the only barnyard genome used
@@ -39,6 +40,11 @@ def formatNumericVal(val:int|float) -> str|float:
     """
     if isinstance(val, int):
         return f"{val:,}"
+    elif isinstance(val, str) and val.isdigit():
+        return f"{int(val):,}"
+    # negative numbers
+    elif isinstance(val, str) and len(val) != 0 and val[0] == "-" and val[1:].isdigit():
+        return f"{int(val):,}"
     elif isinstance(val, float):
         return round(val, 2)
     else:
@@ -78,15 +84,25 @@ def styleTable(styler, title: str, hideColumnHeaders=False, boldColumn=None, num
     styler.set_properties(**{"border-color": 'black', "border-style": 'solid !important'})
     return styler
 
-def createMetricTable(dataframe, title, metricCol='Metric', valueCol='Value'):
+def create_metric_table(df: pd.DataFrame, title: str, rm_nan: bool = False) -> dp.Table:
     """
     Create a datapane tabel from a dataframe with a set of metrics (name / value)
+    
+    Args:
+        df: Dataframe containing metrics with columns 'Metric' and 'Value'
+        title: Title of the table
+        rm_nan: Exclude rows with "nan" (string) value
+        
+    Returns:
+        A datapane table object
     """
-    df = dataframe[[metricCol, valueCol]]
-    style = df.style.pipe(styleTable, title=title, hideColumnHeaders=True, boldColumn=metricCol, numericCols=[valueCol])
-    return mkTable(style)
+    if rm_nan:
+        df = df[df['Value'] != "nan"]
+    metrics = df[['Metric', 'Value']]
+    style = metrics.style.pipe(styleTable, title=title, hideColumnHeaders=True, boldColumn='Metric', numericCols=['Value'])
+    return make_table(style)
 
-def mkTable(styler, label=None) -> dp.Table:
+def make_table(styler, label=None) -> dp.Table:
     """
     Function that creates wrapper around dp.Table which suppresses
     warning that arises from  code within dp.Table calling Styler.render():
@@ -257,8 +273,8 @@ def barcodeLevelPlots(libJson: dict, libStructDir: Path, sampleId: str, cells: p
     namePrefix = title.replace(" ", "_")
     if writeDir:
         if internalReport:
-            cellsPerIndexBar.savefig(writeDir / f"{sampleId}_figures" / f"CellCount_By_{namePrefix}_Heatmap.png")
-            readsPerIndexBox.savefig(writeDir / f"{sampleId}_figures" / f"UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
+            cellsPerIndexBar.savefig(writeDir / "figures_internal" / f"{sampleId}_CellCount_By_{namePrefix}_Heatmap.png")
+            readsPerIndexBox.savefig(writeDir / "figures_internal" / f"{sampleId}_UniqueTranscriptCount_By_{namePrefix}_Heatmap.png")
         wellPlateCellCountDf.to_csv(writeDir / "csv" / f"{sampleId}_unique_transcript_counts_by_{namePrefix}_well.csv")
         wellPlateNumCellDf.to_csv(writeDir / "csv" / f"{sampleId}_num_cells_by_{namePrefix}_well.csv")
     return dp.Group(dp.Text(f'## {title}'), dp.Group(dp.Plot(cellsPerIndexBar), dp.Plot(readsPerIndexBox), columns=2))

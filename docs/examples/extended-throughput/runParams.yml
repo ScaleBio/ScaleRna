@@ -15,7 +15,5 @@ samples : ${projectDir}/docs/examples/extended-throughput/samples.ext.csv
 ### Version of the Scale Single Cell RNA assay used: "libV1.json" or "libV1.1.json"
 libStructure : libV1.1.json
 
-merge: true
-
 ### Path to a .json file defining the reference genome
 genome : ${projectDir}/docs/examples/genome.json

@@ -8,6 +8,11 @@ include { alignment } from './modules/alignment.nf'
 include { multiSampleReport} from './modules/sampleReport.nf'
 include { sampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:false)
 include { sampleReport as mergeSampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:true)
+include { filterMtx } from './modules/createMtx.nf' addParams(mergedSamples:false)
+include { filterMtx as mergedFilterMtx } from './modules/createMtx.nf' addParams(mergedSamples:true)
+include { downstream } from './modules/downstream.nf' addParams(comparison:false)
+include { downstream as mergedDownstream } from './modules/downstream.nf' addParams(comparison:false)
+include { downstream as compareDownstream } from './modules/downstream.nf' addParams(comparison:true)
 
 // Load .json file into object
 // (reference genomes, library design, etc.)
@@ -17,19 +22,29 @@ def loadJson(json) {
 }
 
 // Create a 'file()' from string 'path'
-// 'path' could be null, a s3 URL, an absolute file-path or relative to 'baseDir'
+// 'path' could be null, a URL, an absolute file-path or relative to 'baseDir'
 def expandPath(path, baseDir) {
 	if (path == null) { return null}
-	if (path =~ /^s3/) { return file(path)}
-	return file(baseDir.resolve(path), checkIfExists: true)
+	uri = new URI(path)
+	if (uri.isAbsolute()) {
+		return file(path)
+	} else {
+		return baseDir.resolve(path)
+	}
 }
 
 // Reference genome files and parameters
 // Paths can be absolute or relative to location of json
 def loadGenome(json) {
+	if (json.isDirectory()) {
+		ParamLogger.throwError("--genome should be json file, not a directory: ${json}")
+	}
 	def baseDir = json.getParent()
 	genome = loadJson(json)
 	genome.star_index = expandPath(genome.star_index, baseDir)
+	if (genome.star_index == null || !genome.star_index.exists()) {
+		ParamLogger.throwError("Genome star_index not found: ${genome.star_index?.toUriString() ?: ''}")
+	}
 	genome.gtf = expandPath(genome.gtf, baseDir)
 	return genome
 }
@@ -45,23 +60,6 @@ def loadDemuxReadCounts(demuxMetrics) {
 	return counts
 }
 
-def validateParams() {
-	if (params.samples == null) {
-		ParamLogger.throwError(log, "Must specify --samples (e.g. samples.csv)")
-	}
-	if (params.libStructure == null) {
-		ParamLogger.throwError(log, "Must specify --libStructure (e.g. libV1.1.json)")
-	}
-	if (params.genome == null) {
-		ParamLogger.throwError(log, "Must specify --genome")
-	}
-	if (params.reporting) {
-		if (params.runFolder || params.fastqDir) {
-			ParamLogger.throwError(log, "Cannot specify --runFolder or --fastqDir when running reporting-only (--reporting)")
-		}
-	}
-}
-
 // Prepare samples.csv with defaults, rename legacy columns, etc.
 process regularizeSamplesCsv {
 input: 
@@ -73,7 +71,7 @@ label 'small'
 cache 'deep'
 script:
 	opts=""
-	if (params.splitFastq && (params.runFolder == null)) {
+	if (params.splitFastq) {
 		opts += "--splitSample "
 	}
 	if (params.reporting) {
@@ -128,26 +126,6 @@ script:
 """
 }
 
-// Merge STARSolo outputs (.mtx and CellReads Metrics)
-// Used with --merge
-// Assumes different cells in each subsample
-process mergeSamples {
-input:
-	tuple( val(samples), val(group), path(starDirs) )
-output:
-	tuple(val(group), path(outDir), emit: mergeOut)
-publishDir "$params.outDir/alignment", mode: 'copy'
-label "mergeRawStarOutput"
-tag "$group"
-script:
-	sampleIDs = String.join(" ", samples)
-	matrixFn = Utils.starMatrixFn(params.starMulti)
-	outDir = "${group}.merged/${group}.merged.star.solo/"
-"""
-	mergeRawSTARoutput.py --star_dirs $starDirs --star_feature $params.starFeature --star_matrix $matrixFn --sample_ids $sampleIDs --out_dir $outDir
-"""
-}
-
 //// Sub-workflow to run reporting and output steps downstream of STARSolo
 // Runs cell-filtering, sample metrics, sample report and cell-typing/clustering
 // This does not run the library-level (fastq) report, since that depends on the 
@@ -166,37 +144,54 @@ main:
 	trimStats.dump(tag:'trimStats')
 	isBarnyard = genome.get('isBarnyard', false)
 
-	// Group cutadapt statistics by sample (all subsamples)
-	if (params.splitFastq) {
-		trimStatsBySample = trimStats.map {
-			// Get sample name from "sampleName_wellCoordinate"
-			def sample = it[0].tokenize("_")[0]
-			def file = it[1]
-			tuple(sample, file)
-		}.groupTuple()
-	} else {
-		trimStatsBySample = trimStats
-	}
+	// Group cutadapt statistics by sample
+	// All split-fastq subsamples of the form "sampleName_wellCoordinate" are grouped together
+	// This is a no-op if splitFastq false
+	trimStats.map {
+		def sample = it[0].tokenize("_")[0]
+		def file = it[1]
+		tuple(sample, file)
+	}.groupTuple()
+	.map { tuple(it[0], it[1].flatten())} // Flatten list of empty lists in case of --reporting and --trimStats
+	.dump(tag:'trimStatsBySample')
+	.set{ trimStatsBySample }
 
+	filterMtx(samples, libJson, soloOut, isBarnyard)
+
+	if(params.seurat || params.azimuth || params.annData){
+		downstream(samples, filterMtx.out.allCells, filterMtx.out.filteredMtx, filterMtx.out.rawMtx, filterMtx.out.sampleStats)
+		if(params.compSamples){
+			compareDownstream(samples, filterMtx.out.allCells, filterMtx.out.filteredMtx, filterMtx.out.rawMtx, filterMtx.out.sampleStats)
+		}
+	}
 	// Run reporting on original (un-merged) samples
-	sampleReport(samples, samplesCsv, libJson, soloOut, trimStatsBySample, isBarnyard)
+	sampleReport(samples, libJson, trimStatsBySample, isBarnyard, filterMtx.out.allCells, filterMtx.out.libCount, filterMtx.out.sampleStats)
 	sampleStats = sampleReport.out.sampleStats
 
 	if (params.merge) {
-		// Merge samples (alignment results) by group
-		sampleGroups = samples.map{ tuple(it.id, it.group) }.join(soloOut).groupTuple(by:1)
-		sampleGroups = sampleGroups.filter { it[0].size() > 1} // Don't create merged samples from just one single sample
-		sampleGroups.dump(tag:'sampleGroups')
-		mergeSamples(sampleGroups)
-		mergeTrimStats = sampleGroups.map{ tuple(it[1], []) }
-		// Run reporting on merged samples
-		mergeSampleReport(samples, samplesCsv, libJson, mergeSamples.out.mergeOut, mergeTrimStats, isBarnyard)
+		// Collect all trimStats for one sample (group) into a single list.
+		// The reporting step will sum them up.
+		samples.map{ tuple(it.id, it.group) }
+		.join(trimStatsBySample)
+		.groupTuple(by:1) 
+		.map { tuple(it[1], it[2].flatten())} // Flatten here for splitFastq where each sub-sample already is a list
+		.dump(tag:'mergeTrimStats')
+		.set { mergeTrimStats }
+		// This returns merged samples only for samples with multiple libraries
+		// (Same sample name, different libName)
+		mergedFilterMtx(samples, libJson, soloOut, isBarnyard)
+
+		if(params.seurat || params.azimuth || params.annData){
+			mergedDownstream(samples, mergedFilterMtx.out.allCells, mergedFilterMtx.out.filteredMtx, mergedFilterMtx.out.rawMtx, mergedFilterMtx.out.sampleStats)
+		}
+		// Run reporting on merged samples (if any)
+		mergeSampleReport(samples, libJson, mergeTrimStats, isBarnyard, mergedFilterMtx.out.allCells, mergedFilterMtx.out.libCount, mergedFilterMtx.out.sampleStats)
 		sampleStats = sampleStats.concat(mergeSampleReport.out.sampleStats)
 	}	
 	multiSampleReport(sampleStats.collect()) // Combined original and merged samples
 
 emit:
-	cellMetrics = sampleReport.out.cellMetrics //allcells.csv outputs per sample
+	cellMetrics = filterMtx.out.allCells //allcells.csv outputs per sample
 }
 
 //// Full workflow
@@ -231,9 +226,8 @@ main:
 // Run the workflow for one or multiple samples
 // either from reads (--runFolder/ --fastqDir) or pre-existing alignment results (--resultDir)
 workflow {
-	// Pretty print important parameters along with some additional information about the pipeline
+	// Validate and print key pipeline parameters
 	ParamLogger.initialise(workflow, params, log)
-	validateParams()
 	// Prepare and load samples.csv
 	regularizeSamplesCsv(file(params.samples, checkIfExists:true))
 	samplesCsv = regularizeSamplesCsv.out
@@ -242,14 +236,14 @@ workflow {
 	// Load library structure json and reference genome
 	libJson = expandPath(params.libStructure, file("${projectDir}/references/"))
 	libStructure = loadJson(libJson)
-	genome = loadGenome(file(params.genome))
+	genome = loadGenome(file(params.genome, checkIfExists:true))
 
 	if (params.reporting) {
 		// Load STARsolo output from previous pipeline output directory
 		soloOut = samples.map{tuple(it.id, file("${it.resultDir}/alignment/${it.id}/${it.id}.star.solo", checkIfExists:true))}
 		// We are skipping read trimming statistics when re-running reporting
 		// Doesn't matter for anything other than the field in the HTML report
-		trimStats = Channel.empty()
+		trimStats = samples.map{ tuple(it.id, []) }
 		sampleReporting(samples, samplesCsv, libStructure, libJson, genome, soloOut, trimStats)
 	} else {
 		endToEnd(samples, samplesCsv, libStructure, libJson, genome)

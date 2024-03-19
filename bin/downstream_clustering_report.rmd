@@ -1,0 +1,325 @@
+---
+title: "Clustering and Annotation Report"
+date: "`r format( Sys.time(), '%m/%d/%y')`"
+output: html_document
+params:
+    downstreamResults: "results.csv"
+    sample_stats: "sample_stats.csv"
+    is_comparison: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, dpi = 300)
+
+rlang::global_entrace()
+options(rlang_backtrace_on_error = "full")
+
+library(ggplot2)
+library(dplyr)
+library(data.table)
+
+clusterDat <- fread(params$downstreamResults)
+rownames(clusterDat) <- clusterDat[["cellBarcode"]]
+
+if( params$is_comparison ){
+    sample_stats <- "None"
+} else {
+    sample_stats <- fread(params$sample_stats)
+    rownames(sample_stats) <- sample_stats[["Metrics"]]
+}
+
+azimuthPlots <- ifelse("Azimuth_1" %in% colnames(clusterDat), TRUE, FALSE)
+seuratPlots <- ifelse("Seurat_1" %in% colnames(clusterDat), TRUE, FALSE)
+is_sketch <- ifelse("leverage.score" %in% colnames(clusterDat), TRUE, FALSE)
+is_cellfinder <- ifelse("FDR" %in% colnames(clusterDat), TRUE, FALSE)
+num_samples <- length(unique(clusterDat[["sample"]]))
+
+#Leverage score is a metric calculated when a sketch based analysis is performed.
+#When a sketch based analysis is performed the default name for clusters in the seurat object changes.
+if(is_sketch){
+    clusterColumn <- "cluster_full"
+} else {
+    clusterColumn <- "seurat_clusters"
+}
+
+if(seuratPlots){
+    
+    umap_X <- "Seurat_1"
+    umap_Y <- "Seurat_2"
+    clusterDat[[clusterColumn]] <- as.factor(clusterDat[[clusterColumn]])
+    
+    clusterIds <- unique(clusterDat[[clusterColumn]])
+    clusterPal <- scales::hue_pal()(length(clusterIds))
+    names(clusterPal) <- clusterIds
+
+} else{
+    
+    umap_X <- "Azimuth_1"
+    umap_Y <- "Azimuth_2"
+}
+
+if(azimuthPlots){
+
+    celltypeIdsL1 <- unique(clusterDat[["predicted.celltype.l1"]])
+    palL1 <- scales::hue_pal()(length(celltypeIdsL1))
+    names(palL1) <- celltypeIdsL1
+    
+    celltypeIdsL2 <- unique(clusterDat[["predicted.celltype.l2"]])
+    palL2 <- scales::hue_pal()(length(celltypeIdsL2))
+    names(palL2) <- celltypeIdsL2
+    
+    celltypeIdsL3 <- unique(clusterDat[["predicted.celltype.l3"]])
+    palL3 <- scales::hue_pal()(length(celltypeIdsL3))
+    names(palL3) <- celltypeIdsL3
+}
+
+if(is_cellfinder){
+    class2 <- clusterDat[["classification"]]
+    class2 <- strsplit(x = class2, split = ";")
+    class2 <- sapply(class2, "[[", 1)
+    clusterDat[["classification_2"]] <- class2
+    clusterDat[which(clusterDat[["pass"]] == TRUE & clusterDat[["FDR"]] != 0.0), "classification_2"] <- "rescued cell"
+}
+
+if(params$is_comparison){
+    mito_thresh <- "None"
+    gene_thresh <- "None"
+    umi_thresh <- "None"
+} else {
+    mito_thresh <- as.numeric(sample_stats[Metric == "maximum_mito_pct", 3])
+    gene_thresh <- as.numeric(sample_stats[Metric == "maximum_gene_count", 3])
+    umi_thresh <- as.numeric(sample_stats[Metric == "maximum_umi_count", 3])
+}
+
+clusterDat[["outlier_classification"]] <- gsub(pattern = "cell;", x = clusterDat[["classification"]], replacement = "")
+clusterDat[["outlier_classification"]] <- gsub(pattern = "mitochondrial read percentage", x = clusterDat[["outlier_classification"]], replacement = "mito %")
+clusterDat[["outlier_classification"]] <- gsub(pattern = "cell", x = clusterDat[["outlier_classification"]], replacement = " cell")
+
+legend_theme <- theme(legend.text = element_text(size = 7), legend.title = element_text(size = 7), legend.key.size = unit(7, "pt"), legend.title.align = 0, legend.text.align = 0)
+guide_opts_umap <- guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1)))
+guide_opts_bar <- guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1, stroke = 0)))
+guide_opts_vln <- guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1, stroke = 0)), color = "none")
+```
+
+```{r defineFunctions, echo=FALSE}
+plotScatter <- function(dat, xVar, yVar, colorVar, facetVar){
+
+    pltDat <- dat %>% select(all_of(c(xVar, yVar, colorVar, facetVar)))
+
+    plt <- ggplot(data = pltDat, aes(x = .data[[xVar]], y = .data[[yVar]], color = .data[[colorVar]])) + 
+    geom_point(size = 2, shape = 23) + facet_wrap(facetVar) + theme_classic() + theme(strip.background = element_blank())
+
+    return(plt)
+}
+
+plotUMAP <- function(dat, xVar, yVar, colorVar, sketched, colorPal = "None"){
+
+    pltDat <- dat %>% select(all_of(c(xVar, yVar, colorVar)))
+
+    pltDat <- pltDat[sample(nrow(pltDat)), ]
+    
+    plt <- ggplot(data = pltDat, aes(x = .data[[xVar]], y = .data[[yVar]], color = .data[[colorVar]]))
+    
+    if(sketched){
+        plt <- plt + geom_point(shape = ".", alpha = 1/5)
+    } else {
+        plt <- plt + geom_point(shape = ".")
+    }
+    if(length(colorPal) > 1 ){
+        plt <- plt + scale_color_manual(values = colorPal)
+    }
+
+    plt <- plt + xlab("UMAP_1") + ylab("UMAP_2")
+
+    plt <- plt + theme_classic()
+
+    return(plt)
+}
+
+plotViolin <- function(dat, groupVar, datVar, flip = FALSE, mad_threshold = "None"){
+
+    pltDat <- dat %>% select(all_of(c(groupVar, datVar)))
+
+    pltDat[[groupVar]] <- as.factor(pltDat[[groupVar]])
+
+    plt <- ggplot(data = pltDat, aes(x = .data[[groupVar]], y = .data[[datVar]], fill = .data[[groupVar]], color = .data[[groupVar]])) + 
+    geom_violin(trim = FALSE, scale = "width", key_glyph = draw_key_point) + theme_classic()
+    
+    if(flip){
+        plt <- plt + coord_flip() + scale_x_discrete(limits=rev)
+    }
+    if(mad_threshold == "None"){
+        return(plt)
+    } else {
+        plt <- plt + geom_hline(aes(yintercept = mad_threshold, linetype = "MAD Threshold"), color = "red") + scale_linetype_manual(name = "", values = "dashed")
+        return(plt)
+    }
+}
+percentageBar <- function(dat, groupVar, dodgeVar){
+
+    pltDat <- dat %>% group_by(.data[[dodgeVar]], .data[[groupVar]]) %>%
+        summarise(count = n()) %>% mutate(percent = count / sum(count))
+        
+    plt <- ggplot(data = pltDat, aes(x = percent, y = .data[[groupVar]], fill = .data[[dodgeVar]])) + 
+    geom_col(position = "dodge", key_glyph = draw_key_point) + 
+    scale_x_continuous(labels = scales::percent) +
+    scale_y_discrete(limits=rev) +
+    #geom_text(aes(x = percent, y = .data[[groupVar]], label = count), position = position_dodge2(width = .9)) + 
+    xlab("Percent") +
+    theme_classic()
+    
+    return(plt)
+}
+plotStackedBar <- function(dat, groupVar, datVar, colorPal = "None"){
+
+    pltDat <- dat %>% select(all_of(c(groupVar, datVar)))
+    pltDat[[datVar]] <- as.factor(pltDat[[datVar]])
+
+    plt <- ggplot(data = pltDat, aes(x = .data[[groupVar]], fill = .data[[datVar]])) + 
+        geom_bar(position = "fill", key_glyph = draw_key_point) + 
+        theme_classic() + 
+        theme(axis.text.x = element_text(angle = -45, hjust = 0))
+        
+    if(length(colorPal) > 1 ){
+        plt <- plt + scale_fill_manual(values = colorPal)
+    }
+    
+    return(plt)
+}
+```
+
+## {.tabset}
+
+### Cell Typing
+
+```{r umapCluster, eval= seuratPlots}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = clusterColumn, sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Cluster") + labs(title = "UMAP Colored by Seurat Cluster")
+```
+
+```{r umapCelltypeL1, eval=azimuthPlots}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "predicted.celltype.l1", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Cell Type (L1)") + labs(title = "UMAP Colored by Azimuth Cell Type (L1)")
+```
+
+```{r umapCelltypeL2, eval=azimuthPlots}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "predicted.celltype.l2", sketched = is_sketch) + legend_theme + guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1), nrow = 27)) + labs(color = "Cell Type (L2)") + labs(title = "UMAP Colored by Azimuth Cell Type (L2)")
+```
+
+```{r seuratUMAPcelltypeL3, eval=azimuthPlots}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "predicted.celltype.l3", sketched = is_sketch) + legend_theme + guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1), nrow = 42)) + labs(color = "Cell Type (L3)")+ labs(title = "UMAP Colored by Azimuth Cell Type (L3)")
+```
+
+
+```{r vlnPlotUMIClusters, eval=seuratPlots}
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "umis", mad_threshold = umi_thresh) + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of UMIs") + labs(title = "Number of UMIs per Cluster")
+```
+
+```{r vlnPlotGenesCluster, eval=seuratPlots}
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "genes", mad_threshold = gene_thresh) + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of Genes") + labs(title = "Number of Genes per Cluster")
+```
+
+```{r vlnPlotMitoCluster, eval=seuratPlots}
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "mitoProp", mad_threshold = mito_thresh) + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("% Mito Reads") + labs(title = "% Mito Reads per Cluster")
+```
+
+
+```{r stackedBarL1, eval=azimuthPlots & num_samples > 1}
+plotStackedBar(dat = clusterDat, groupVar = "sample", datVar = "predicted.celltype.l1") + legend_theme + guide_opts_bar + labs(fill = "Cell Type (L1)") + xlab("Sample") + ylab("Cell Type Proportion") + labs(title = "Proportion of Cell Types (L1) per Sample")
+```
+
+```{r stackedBarL2, eval=azimuthPlots & num_samples > 1}
+plotStackedBar(dat = clusterDat, groupVar = "sample", datVar = "predicted.celltype.l2") + legend_theme + guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1), nrow = 27)) + labs(fill = "Cell Type (L2)") + xlab("Sample") + ylab("Cell Type Proportion Proportion") + labs(title = "Proportion of Cell Types (L2) per Sample")
+```
+
+```{r stackedBarL3, eval=azimuthPlots & num_samples > 1}
+plotStackedBar(dat = clusterDat, groupVar = "sample", datVar = "predicted.celltype.l3") + legend_theme + guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1), nrow = 42)) + labs(fill = "Cell Type (L3)") + xlab("Sample") + ylab("Cell Type Proportion") + labs(title = "Proportion of Cell Types (L3) per Sample")
+```
+
+```{r, eval=azimuthPlots}
+percentageBar(dat = clusterDat, groupVar = "predicted.celltype.l1", dodgeVar = "sample") + legend_theme + guide_opts_bar + labs(title = "Percentages of Azimuth Cell Types (L1)")
+```
+
+
+```{r stackedBarCluster, eval=seuratPlots & num_samples > 1}
+plotStackedBar(dat = clusterDat, groupVar = "sample", datVar = clusterColumn) + legend_theme + guide_opts_bar + labs(fill = "Cluster") + xlab("Sample") + ylab("Cluster Proportion") + labs(title = "Proportion of Seurat Clusters per Sample")
+```
+
+```{r stackedBarSample, eval=seuratPlots & num_samples > 1}
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "sample") + legend_theme + guide_opts_bar + labs(fill = "Sample") + xlab("Cluster") + ylab("Sample Proportion") + labs(title = "Sample Proportion per Seurat Cluster")
+```
+
+
+### QC
+
+```{r umapSamples, eval=num_samples > 1}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "sample", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Sample") + labs(title = "UMAP Colored by Sample ID")
+```
+
+```{r umapOutliers}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "outlier_classification", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Outlier Class.") + labs(title = "UMAP Colored by Outlier Classification")
+```
+
+```{r umapRescuedCells, eval=FALSE}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "classification_2", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Cell Finder Class.") + labs(title = "UMAP Colored by Cell Finder Classification")
+```
+
+```{r umapRTbarcode}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "RT_alias", sketched = is_sketch) + legend_theme + guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1), nrow = 32)) + labs(color = "RT Well") + labs(title = "UMAP Colored by RT Well")
+```
+
+```{r umapUmis}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "umis", sketched = is_sketch) + legend_theme + labs(color = "# of UMIs") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number of UMIs")
+```
+
+```{r umapGenes}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "genes", sketched = is_sketch) + legend_theme + labs(color = "# of Genes") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number of Genes")
+```
+
+```{r umapReads}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "reads", sketched = is_sketch) + legend_theme + labs(color = "# of Reads") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number Of Reads")
+```
+
+```{r umapMitoReads}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "mitoProp", sketched = is_sketch) + legend_theme + labs(color = "Mito. Prop.") + labs(title = "UMAP Colored by Proportion of Mitochondrial Reads") + scale_color_continuous(labels = scales::label_number(big.mark = ","))
+``` 
+
+```{r stackedBarRT, eval=seuratPlots}
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "RT_alias") + legend_theme + guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1), nrow = 32)) + labs(fill = "RT Well") + xlab("Cluster") + ylab("RT Well Proportion") + labs(title = "RT Well Proportion per Seurat Cluster")
+```
+
+```{r stackedBarOutliers, eval=FALSE}
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "classification_2") + legend_theme + guide_opts_bar + labs(fill = "Classification") + xlab("Cluster") + ylab("Proportion") + labs(title = "Proportion of Rescued Cells per Cluster")
+```
+
+```{r stackedBarClusterOutliers, eval=seuratPlots}
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "outlier_classification") + legend_theme + guide_opts_bar + labs(fill = "Outlier Classification") + xlab("Cluster") + ylab("Proportion") + labs(title = "Outlier Proportion per Seurat Cluster")
+```
+
+
+```{r madTable, eval= FALSE, include=FALSE }
+knitr::kable(sample_stats[,-1], format = "html", digits = 2, align = "lcr")
+```
+
+```{r outlierTable, include=FALSE}
+tabDat <- clusterDat %>% group_by(sample, classification) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+fwrite(tabDat, file = "outlier_summary.csv")
+```
+
+```{r celltypeL1table, eval=azimuthPlots, include=FALSE}
+tabDat <- clusterDat %>% group_by(sample, predicted.celltype.l1) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+fwrite(tabDat, file = "l1.celltype_summary.csv")
+```
+
+```{r seuratClusterTable, eval=seuratPlots, include=FALSE}
+tabDat <- clusterDat %>% group_by(.data[["sample"]], .data[[clusterColumn]]) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+fwrite(tabDat, file = "seurat.cluster_summary.csv")
+```
+
+```{r celltypeL2table, eval=azimuthPlots, include=FALSE}
+tabDat <- clusterDat %>% group_by(sample, predicted.celltype.l2) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+fwrite(tabDat, file = "l2.celltype_summary.csv")
+```
+
+```{r celltypeL3table, eval=azimuthPlots, include=FALSE}
+tabDat <- clusterDat %>% group_by(sample, predicted.celltype.l3) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+fwrite(tabDat, file = "l3.celltype_summary.csv")
+```

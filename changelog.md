@@ -1,3 +1,23 @@
+# Version 1.5
+## 1.5.0-beta2
+* Fix merged rank plot in library html report
+## 1.5.0-beta
+* Fix behavior of expectedCells and fixedCells
+* Fix mouse background calculation for barnyard runs
+* Add support to output an anndata object
+* When splitFastq is true, output merged bcParser stats with the libName as a prefix in the filename
+* Increased number of retries for all failed jobs and redefined retry strategy for reporting jobs 
+* Added validation to check user supplied arguments against all possible arguments supported in the piopeline
+* Changed barcode rank plot to be a scatter plot from a line plot
+* Cell calling parameter _minReads_ changed to _minUTC_
+* All ScaleBio containers moved to AWS ECR
+* Simplified parallelism strategy
+* Proportion of mitochondrial reads calculated based on mapped reads now
+* Make --merge the default
+* More stringent CellFinder FDR default of 0.001
+* Adding new optional cell calling method (_CellFinder_)
+* Updated (seurat v5-based) clustering workflow and report
+
 # Version 1.4
 ## 1.4.1
 * Update `datapane` version to remove need to access users home dir.

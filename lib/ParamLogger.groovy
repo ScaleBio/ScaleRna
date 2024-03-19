@@ -1,3 +1,5 @@
+import nextflow.Nextflow
+
 // Adapted from nf-core/rnaseq
 class ParamLogger {
     public static void initialise(workflow, params, log) {
@@ -6,63 +8,121 @@ class ParamLogger {
             System.exit(0)
         }
         log.info paramsSummaryLog(workflow, params)
+        validateParams(params, log)
     }
 
-    public static String throwError(log, errMessage) {
-        log.error errMessage
-        sleep(200)
-        System.exit(1)
-    }   
+    public static String throwError(errMessage) {
+        Map colors = logColours()
+        Nextflow.error("${colors.red}ERROR${colors.reset}: $errMessage")
+    }
+    
+    // Takes a camelCase string and converts it to kebab-case
+    // Necessary for validating parameters since nextflow converts camelCase to kebab-case
+    public static String camelToKebab(String camelCase) {
+        return camelCase.replaceAll(/([a-z])([A-Z])/, '$1-$2').toLowerCase()
+    }
 
-    public static LinkedHashMap paramsSummaryMap(workflow, params) {
+    // Check required workflow inputs
+    public static validateParams(params, log) {
+        // PLEASE ADD NEW PARAMETERS TO THE allowed_parameters LIST
+        // useSTARthreshold is a special case because how nextflow resolves it to kebab case seems incorrect
+        // use-starthreshold is the correct kebab case
+        def allowed_parameters = ['samples', 'genome', 'runFolder', 'fastqDir', 'fastqSamplesheet', 'reporting',
+                                  'resultDir', 'outDir', 'bamOut', 'fastqOut', 'libStructure', 'merge', 'splitFastq',
+                                  'bclConvertParams', 'fastqc', 'task_max_memory', 'starFeature', 'starMulti', 'starStrand',
+                                  'trimFastq', 'trimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
+                                  'task_max_memory', 'task_max_cpus', 'task_max_time', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
+                                  'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
+                                  'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filter_outliers', 'num_mad_genes',
+                                  'num_mad_umis', 'num_mad_mito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData']
+        def master_list_of_params = allowed_parameters
+        allowed_parameters.each { str ->
+            master_list_of_params += camelToKebab(str)}
+        def parameter_diff = params.keySet() - master_list_of_params
+        if (parameter_diff.size() == 1){
+            log.warn("[Argument Error] Parameter $parameter_diff is not valid in the pipeline!")
+        }
+        if (parameter_diff.size() > 1){
+            log.warn("[Argument Error] Parameters $parameter_diff are not valid in the pipeline!")
+        }
+        if (params.samples == null || params.samples == true) {
+            throwError("Must specify --samples (e.g. samples.csv)")
+        }
+        if (params.libStructure == null || params.libStructure == true) {
+            throwError("Must specify --libStructure (e.g. libV1.1.json)")
+        }
+        if (params.genome == null || params.genome == true) {
+            throwError("Must specify --genome")
+        }
+        if (params.reporting) {
+            if (params.runFolder || params.fastqDir) {
+                throwError("Cannot specify --runFolder or --fastqDir when running reporting-only (--reporting)")
+            }
+        }
+    }
+    
+    static LinkedHashMap paramsSummaryMap(workflow, params) {
         def Map nextflow_opts = [:] // Core Nextflow options
         def Map workflow_opts = [:] // ScaleBio Workflow parameters
         def Map exec_opts = [:] // ScaleBio Workflow execution options
+        def Map input_opts = [:] // Workflow inputs
 
         nextflow_opts['Workflow Directory:']   = workflow.projectDir
         nextflow_opts['Workflow Version:'] = workflow.manifest.version
-        if (workflow.revision) {
-            nextflow_opts['Workflow Revision'] = workflow.revision
-        }
-        nextflow_opts['Command Line']      = workflow.commandLine
-        nextflow_opts['Nextflow RunName']      = workflow.runName
-        nextflow_opts['Profile']      = workflow.profile
-        nextflow_opts['Config Files']  = workflow.configFiles.join(', ')
+        if (workflow.revision) { nextflow_opts['Workflow Revision'] = workflow.revision }
+        nextflow_opts['Command Line'] = workflow.commandLine
+        nextflow_opts['Nextflow RunName'] = workflow.runName
+        nextflow_opts['Profile'] = workflow.profile
+        nextflow_opts['Config Files'] = workflow.configFiles.join(', ')
         if (workflow.containerEngine) {
             nextflow_opts['Container Engine'] = workflow.containerEngine
         }
-        nextflow_opts['Launch Directory']      = workflow.launchDir
-        nextflow_opts['Work Directory']      = workflow.workDir
-        workflow_opts['Workflow Output']       = params.outDir
-        if (params.fastqDir) {
-            workflow_opts['fastqDir'] = params.fastqDir
-        }
-        if (params.runFolder) {
-            workflow_opts['runFolder'] = params.runFolder
-        }
-        if (params.reporting) {
-            workflow_opts['reporting'] = params.reporting
-        }
-        workflow_opts['samples'] = params.samples
-        workflow_opts['genome'] = params.genome
-        workflow_opts['libStructure'] = params.libStructure
+        nextflow_opts['Launch Directory'] = workflow.launchDir
+        nextflow_opts['Work Directory'] = workflow.workDir
 
-        workflow_opts['trimFastq'] = params.trimFastq
-        workflow_opts['starFeature'] = params.starFeature
-        workflow_opts['starMulti'] = params.starMulti
-
+        exec_opts['Workflow Output'] = params.outDir
+        if (params.reporting) { exec_opts['reporting'] = params.reporting }
+        exec_opts['merge'] = params.merge
         exec_opts['splitFastq'] = params.splitFastq
         exec_opts['task_max_memory'] = params.task_max_memory
         exec_opts['task_max_cpus'] = params.task_max_cpus
 
+        if (params.fastqDir) {
+            input_opts['fastqDir'] = params.fastqDir
+        } else if (params.runFolder) {
+            input_opts['runFolder'] = params.runFolder
+        }
+        if (params.reporting) { input_opts['resultDir'] = params.resultDir }
+        input_opts['samples'] = params.samples
+        input_opts['genome'] = params.genome
+        input_opts['libStructure'] = params.libStructure
+
+        workflow_opts['trimFastq'] = params.trimFastq
+        workflow_opts['starFeature'] = params.starFeature
+        workflow_opts['starMulti'] = params.starMulti
+        if (params.fixedCells != 0) {
+            workflow_opts['fixedCells'] = params.fixedCells
+        } else if (params.UTC != 0) {
+            workflow_opts['UTC'] = params.UTC
+        } else {
+            workflow_opts['minUTC'] = params.minUTC
+            workflow_opts['cellFinder'] = params.cellFinder
+        }
+
+        if (params.seurat) {
+            workflow_opts['seurat'] = params.seurat
+            workflow_opts['azimuth'] = params.azimuth
+            workflow_opts['compSamples'] = params.compSamples
+        }
+
         return [ 'Core Nextflow Options': nextflow_opts,
-            'Analysis Parameters': workflow_opts,
-            'Workflow Execution Options': exec_opts]
+            'Inputs': input_opts,
+            'Workflow Execution Options': exec_opts,
+            'Analysis Parameters': workflow_opts
+        ]
     }
 
-    //
     // Beautify parameters for summary and return as string
-    //
     public static String paramsSummaryLog(workflow, params) {
         Map colors = logColours()
         String output  = ''
@@ -81,6 +141,8 @@ class ParamLogger {
         output += dashedLine()
         return output
     }
+
+
     public static Map logColours(monochrome_logs=false) {
         Map colorcodes = [:]
         // Reset / Meta
