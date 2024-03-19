@@ -7,7 +7,7 @@ In addition to third-party and open-source software the workflow also uses execu
 	- Barcode and read-level metrics
 
 ## Installation
-These tools are included in the `scaleRna` docker container image; when running the workflow with `-profile docker` (or another container engine, such as _singularity_, _podman_ etc.), they will be automatically available.
+These tools are included in the `scalerna` docker container image; when running the workflow with `-profile docker` (or another container engine, such as _singularity_, _podman_ etc.), they will be automatically available.
 
  These tools are however currently not available through Conda, so if running without a container system, they need to be installed first. A download script to get static pre-compiled binaries for linux (*x86_64*) is included. Simply run:
 

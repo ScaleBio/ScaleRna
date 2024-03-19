@@ -9,16 +9,22 @@ output:
 	tuple(val(sample), path("Log.*"), emit: log)
 	tuple(val(sample), path("${sample}"), emit: solo)
 
-// If params.splitFastq is true publishDir = params.outDir/alignment/<sample>/split/
-// If params.splitFastq is false publishDir = params.outDir/alignment/<sample>
-// If params.splitFastq is true output filenames = <sample>.<count>.*
-// If params.splitFastq is false output filenames = <sample>.*
-// BAM file is only published if params.bamOut = true
-publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/" : "$params.outDir/alignment/$sample"}, pattern: "${sample}", mode: 'copy', saveAs: { params.splitFastq ? "${sample}.${count}.star.solo" : "${sample}.star.solo"}
-publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/${sample}.${count}.star.align" : "$params.outDir/alignment/$sample/${sample}.star.align"}, pattern: "*bam", mode: 'copy', saveAs: {params.splitFastq ? "${sample}.${count}.bam" : "${sample}.bam"}, enabled: params.bamOut
-publishDir path: {params.splitFastq ? "$params.outDir/alignment/${sample}/split/${sample}.${count}.star.align" : "$params.outDir/alignment/$sample/${sample}.star.align"}, pattern: "Log*", mode: 'copy'
-tag "$sample"
+// If params.splitFastq is true we publish individual split outputs into params.outDir/alignment/<sample>/split/
+// with output filenames <sample>.<count>.*
+// Otherwise just params.outDir/alignment/<sample>/<sample>.*
+// BAM file is only published with --bamOut
+publishDir { outDir }, pattern: "${sample}", mode: 'copy', saveAs: { "${outName}.star.solo" }
+publishDir { outDir / "${outName}.star.align" }, pattern: "*bam", mode: 'copy', saveAs: { "${outName}.bam" }, enabled: params.bamOut
+publishDir { outDir / "${outName}.star.align" }, pattern: "Log*", mode: 'copy'
+tag "$sample $count"
 script:
+	outDir = file(params.outDir) / "alignment" / sample
+	outName = sample
+	if (params.splitFastq) {
+		outDir = outDir / "split"
+		outName = "${sample}.${count}"
+	}
+	
 	barcodeParam = library["star_barcode_param"]
 	if (params.bamOut) {
 		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outSAMunmapped Within"
@@ -42,8 +48,9 @@ input:
     tuple(val(sample), path("Solo.out*"))
 output:
     tuple(val(sample), path(outDir), emit: merge)
-label "mergeRawStarOutput"
-publishDir "$params.outDir/alignment/", mode:'copy'
+label "report"
+tag "$sample"
+publishDir file(params.outDir) / "alignment", mode:'copy'
 script:
 	outDir = "${sample}/${sample}.star.solo"
 	matrixFn = Utils.starMatrixFn(params.starMulti)

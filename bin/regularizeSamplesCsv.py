@@ -9,22 +9,28 @@ Writes the normalized samples.csv to stdout
 import argparse
 import csv
 import sys
+import json
+import pandas as pd
 from pathlib import Path
 from typing import Optional, Dict, List
 
 def validateName(name):
     """
-    Check sample and library names for invalid characters
+    Check sample name or ID for invalid characters
     Print error and exit for invalid names
 
     Args:
-        name: sample/library name to check
+        name: sample name or ID
     """
     for n in name:
         if not (n.isalnum() or n in "-."):
             print(f"Name should only contain [a-z],[A-Z],[0-9], dash (-) or dot (.): {name}",
                   file=sys.stderr)
             sys.exit(1)
+    if not name[0].isalpha():
+        print(f"Name should start with a letter: {name}",
+                file=sys.stderr)
+        sys.exit(1)
 
 def makeUniqueSampleIds(cols, rows):
     """
@@ -43,8 +49,46 @@ def makeUniqueSampleIds(cols, rows):
             r.insert(0, f"{r[sampleInd]}.{r[libInd]}")
     cols.insert(0, "id")
 
+def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, libraryStruct: Path):
+    """
+    Check whether the user supplied barcode ranges overlap amongst samples
+    Throw exception if there is an overlap
+    
+    Args:
+        all_samples_barcode_range: Dictionary of barcode ranges for all samples with libName as key
+        libraryStruct: Path to the library structure json file
+    """
+    lib_struct_dir = libraryStruct.parent
+    lib_struct = json.load(open(libraryStruct))
+    # Get the txt file that corresponds to the sample_barcode in the lib json
+    for barcode_info in lib_struct['barcodes']:
+        if lib_struct['sample_barcode'] == barcode_info['name']:
+            fname = barcode_info['sequences']
+            break
+    barcode_whitelist = pd.read_csv(lib_struct_dir / fname, sep="\t", names=['barcode', 'well'])
+    for libName in all_samples_barcode_range:
+        # Needs to be rest for each libName
+        verbose_barcodes_list = []
+        for sample_barcodes in all_samples_barcode_range[libName]:
+            # String can be a single barcode or a range of barcodes separated by semi-colon
+            for semi_colon_separated in sample_barcodes.split(";"):
+                if "-" in semi_colon_separated:
+                    # Get well coordinate that corresponds to starting of the barcodes range for a sample
+                    starting = barcode_whitelist.index[barcode_whitelist['well']==semi_colon_separated.split("-")[0]][0]
+                    # Get well coordinate that corresponds to end of the barcodes range for a sample
+                    end = barcode_whitelist.index[barcode_whitelist['well']==semi_colon_separated.split("-")[1]][0]
+                    # Retrieve all the well coordinates that correspond to the barcodes range for a sample
+                    all_barcodes = barcode_whitelist.loc[starting:end, 'well'].tolist()
+                    # extend because all_barcodes is a list
+                    verbose_barcodes_list.extend(all_barcodes)
+                else:
+                    verbose_barcodes_list.append(semi_colon_separated)
+        # Check whether the barcode ranges overlap amongst individual samples
+        if len(verbose_barcodes_list) != len(set(verbose_barcodes_list)):
+            print(f"The barcodes range mentioned for each sample overlap amongst individual samples", file=sys.stderr)
+            sys.exit(1)
 
-def main(samplesCsv:Path, splitFastq:bool, reporting:bool, resultDir:Optional[str]):
+def main(samplesCsv:Path, splitFastq:bool, reporting:bool, libraryStruct:Path, resultDir:Optional[str]):
     """
     Writes normalized samples.csv to stdout
     Args:
@@ -54,7 +98,9 @@ def main(samplesCsv:Path, splitFastq:bool, reporting:bool, resultDir:Optional[st
     """
     # Load column headers and all lines from the csv into lists
     rows: List[List[str]] = [] # Each row of the CSV, split by column
-    with open(samplesCsv) as csvfile:
+    # utf8-sig ignores 'BOM' characters at the beginning of the file, which some users might
+    # accidentally add and which will break downstream parsing of samples.csv column headers.
+    with open(samplesCsv, encoding='utf-8-sig') as csvfile:
         samples = csv.reader(csvfile)
         cols = next(samples) # CSV column header (in same order as values in rows)
         # Trim empty columns
@@ -119,20 +165,31 @@ def main(samplesCsv:Path, splitFastq:bool, reporting:bool, resultDir:Optional[st
             ids.add(id)
         validateName(r[cols.index("sample")])
 
+    all_samples_barcode_range = {}
+
     if not reporting:
         if "libName" not in cols: # Only one (unnamed) library; Use default name
             cols.insert(2, "libName")
             for r in rows:
                 r.insert(2, "ScaleRNA")
+        libNameIndex = cols.index("libName")
+        for r in rows:
+            all_samples_barcode_range[r[libNameIndex]] = []
         if "barcodes" not in cols:
             cols.append("barcodes")
             for r in rows:
                 r.append("1A-12H")
+                all_samples_barcode_range[r[libNameIndex]].append("1A-12H")
         else: # check whether each entry for barcodes is empty or not
             barcodesIndex = cols.index("barcodes")
             for r in rows:
                 if r[barcodesIndex].strip() == "":
                     r[barcodesIndex]="1A-12H"
+                    all_samples_barcode_range[r[libNameIndex]].append("1A-12H")
+                else:
+                    r[barcodesIndex] = r[barcodesIndex].replace(" ", "")
+                    all_samples_barcode_range[r[libNameIndex]].append(r[barcodesIndex])
+        check_whether_barcode_ranges_overlap(all_samples_barcode_range, libraryStruct)
         if splitFastq:
             if "split" not in cols:
                 cols.append("split")
@@ -159,5 +216,6 @@ if __name__ == '__main__':
     parser.add_argument('--splitSample', help='Flag that denotes whether bcParser will split per RT well to ensure parallelization', action="store_true", default=False)
     parser.add_argument('--reporting', help='set for use in merging/reporting only workflow', action="store_true", default=False)
     parser.add_argument('--resultDir', help="Previous pipeline output directory (used as default for 'resultDir column)")
+    parser.add_argument('--libraryStruct', help="Library structure json file", type=Path)
     args = parser.parse_args()
-    main(args.samples, args.splitSample, args.reporting, args.resultDir)
+    main(args.samples, args.splitSample, args.reporting, args.libraryStruct, args.resultDir)

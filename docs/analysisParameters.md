@@ -1,6 +1,6 @@
 # Analysis parameters
 
-All analysis parameters can be set in a `runParams.yml` file, which is then passed to nextflow with `nextflow run -params-file runParams.yml`. 
+All analysis parameters can be set in a [runParams.yml](../docs/examples/runParams.yml) file, which is then passed to nextflow with `nextflow run -params-file runParams.yml`. 
 Alternatively each option is this file can also be set on the nextflow command-line directly, overwriting the value in the parameter file. E.g.
 `nextflow run --samples=samples.foo.csv`
 
@@ -8,19 +8,19 @@ Alternatively each option is this file can also be set on the nextflow command-l
 
 
 ## Inputs
-The workflow can either start from an Illumina sequencer runFolder (bcl files) or a directory with fastq files. Specify either
+The workflow can either start from an Illumina sequencer run folder (bcl files) or a directory with fastq files. Specify either
 * runFolder : "path/to/runFolder" <br>
 OR
 * fastqDir : "path/to/fastqs"
 
-where fastqDir is a directory containing all input fastq files. See [Fastq Generation](fastqGeneration.md) for details on file names, etc.
+where `fastqDir` is a directory containing all input fastq files. See [Fastq Generation](fastqGeneration.md) for details on file names, etc.
 
-When starting from a sequencer run folder the workflow uses Illumina [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) for automatic fastq generation.
+`runFolder` is the top-level directory for a sequencer output (containg `RunInfo.xml`). the workflow uses Illumina [bcl-convert](https://support.illumina.com/sequencing/sequencing_software/bcl-convert.html) for automatic fastq generation.
 
 ### Sample Information
 * samples : "samples.csv"
 
-A [file](examples/samples.csv) listing all samples in the analysis with their names, barcode sequences and optional sample settings
+A [file](examples/samples.csv) listing all samples in the analysis with their names, sample barcodes (RT) and optional sample settings
 
 ### Reference Genome
 * genome : "/genomes/grch38/genome.json"
@@ -37,19 +37,22 @@ See [nextflow.config](../nextflow.config) for a list of all available parameters
 
 ### BAM Output
 Setting `bamOut` to false will suppress alignment (.bam file) output from STAR. Gene expression results (.mtx), and all other workflow outputs, are still generated of course.
-If the user does not specifically need alignments for custom downstream analysis, disabling BAM output will save compute time and storage space.
+If alignments are not required for custom downstream analysis, disabling BAM output will save compute time and storage space.
 
 ### Parallel Execution for Large Datasets
-The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. This is generally recommended for large datasets, e.g. full NovaSeq runs. Based on what type of input is provided, the workflow has two different modes of parallelism:
-* *RunFolder*: The workflow automatically splits the data into 96 fastq files (one per PCR barcode), which are processed in parallel.
-* *Fastq*: Each set of input fastq files (_R1_, _R2_,_I1_) is processed through barcode parsing in parallel. Hence it is important to have multiple input fastq files for better parallelism, e.g. one set of files per lane or per ScaleBio PCR index. After barcode parsing, the workflow continues parallelized by RT barcode.
+The workflow can be executed with extra parallelism by setting the `--splitFastq` parameter. This is generally recommended for large datasets, e.g. full NovaSeq runs. Parallelization is implemented at different stages of the workflow's execution:
+* If starting from a RunFolder (BCL): The workflow automatically splits the data into 96 fastq files (one per PCR barcode).
+* All sets of fastq files (`R1`, `R2`, `I1`, `I2`), either from --`fastqDir` or built-in bcl-convert, are processed in parallel in _N_ groups (`bcParserJobs` parameter in `nextflow.config`) through bcParser.
+* After barcode parsing, the data is split by RT barcode through alignment.
+* Split samples are merged after alignment (gene expression matrix, metric files, etc.).
 
-Split samples are merged after alignment (gene expression matrix, metric files, etc.).
+*Note*: When starting from fastq files, the first workflow steps are parallelized per set of input fastq files, so it is important to have the data in multiple input fastq files for better performance. The easiest way is to use a `samplesheet.csv` to split the data by `index2` (_I5_), see [fastqGeneration](fastqGeneration.md)
+
 
 ### Library Structure Definition
 The library structure JSON file defines 
 * Where in the reads cell-barcodes are found
 * What the list of allowed barcode sequences is
-* Which parts of the reads represent genomic DNA and which should be masked (e.g. RT and ligation barcodes)
+* Which parts of the reads represent cDNA for alignment
 
 The workflow includes default files for version 1.0 and 1.1 of the RNA kit in [references](../references/).

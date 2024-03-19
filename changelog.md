@@ -1,3 +1,20 @@
+# Version 1.5
+* New optional _EmptyDrops_-like cell calling method (`--cellFinder`)
+* Correct up to one `N` basecall per barcode, like other sequencing errors 
+* Rename resource limit parameters (_taskMaxMemory_, _taskMaxCpus_, _taskMaxTime_)
+* Added option to output an anndata object of the cell-count matrix (`--annData`)
+* Updated optional clustering workflow and report (seurat v5-based)
+* Changed threshold settings (_expectedCells_, _fixedCells_, _minUTC_)
+* Separated `pass` and `flags` columns for cell-calling in `allCells.csv`
+* Make `--merge` the default for extended-throughput plate runs
+* Fixed mouse background calculation for barnyard runs
+* Compute mitochondrial fraction based on mapped reads
+* Changed barcode rank plot to support _CellFinder_ calls
+* Simplified parallelism strategy
+* Improved task error retry strategy
+* Added more input parameter validations
+* All ScaleBio docker containers moved to AWS ECR
+
 # Version 1.4
 ## 1.4.1
 * Update `datapane` version to remove need to access users home dir.

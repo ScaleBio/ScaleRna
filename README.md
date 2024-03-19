@@ -3,7 +3,7 @@
 This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequencing libraries. It processes data from sequencing reads to alignments, single-cell outputs (gene-expression matrix, etc.), and QC reports.
 
 ## Getting started
-* First install [Nextflow](http://www.nextflow.io) (at least 22.10; 23.10 or newer recommended)
+* First install [Nextflow](http://www.nextflow.io) (version 23.10 or later)
 * Download this workflow to your machine
 * Setup [dependencies](docs/dependencies.md)
 * Launch the small pipeline [test run](#workflow-test)
@@ -28,9 +28,11 @@ This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequenci
     * The workflow requires a reference genome, including a [STAR](https://github.com/alexdobin/STAR) index for alignment, and gene annotation. See [Reference Genomes](docs/genomes.md)
 * Kit version / Library structure
     * Select the `libStructure` corresponding to the version of the ScaleBio RNA kit used. See [Analysis Parameters](docs/analysisParameters.md#kit-version)
+    * Version 1.0 requires `Read1`, `Read2` and `Index1 or i7`
+    * Version 1.1 requires `Read1`, `Read2`, `Index1 or i7` and `Index2 or i5`
 
 ## Outputs
-The workflow produces per-sample and per-library QC reports (`html`), alignments (`bam`), a cell-by-gene count-matrix (`mtx`) and more; See [Outputs](docs/outputs.md) for a full list.
+The workflow produces per-sample and per-library ScaleBio demultiplexed reads (`fastqs`), alignments (`bam`), QC reports (`html`), a cell-by-gene count-matrix (`mtx`) and more; See [Outputs](docs/outputs.md) for a full list.
 
 ## Extended Throughput Kit
 To analyze data from multiple final distribution plates in the extended throughput kit, see [Extended Throughput](docs/extendedThroughput.md)
@@ -45,15 +47,15 @@ A small test run, with all input data stored online, can be run with the followi
 
 With this command, nextflow will automatically download the input data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/202308_tinyPipelineTest/fastqs/ fastqs --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/202312_rnaV1.1/fastqs/ fastqs --no-sign-request
 aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome --no-sign-request
 ```
 and then run with
 ```
-nextflow run /PATH/TO/ScaleRna/ -profile PROFILE --samples /PATH/TO/ScaleRna/docs/examples/samples.csv --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
+nextflow run /PATH/TO/ScaleRna/ -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
 ```
 
-Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a real assay.
+Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a complete dataset.
 
 ### Nextflow Command-line
 `nextflow` options are given with a single `-` (e.g. `-profile`), while workflow parameters (e.g. `--outDir`) are given with a double dash `--`. See the [Nextflow command-line documentation](https://www.nextflow.io/docs/latest/cli.html) for further details.

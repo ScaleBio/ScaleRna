@@ -1,7 +1,0 @@
-name: scrublet
-channels:
-  - defaults
-  - conda-forge
-dependencies:
-  - python=3.11.4
-  - bioconda::scrublet=0.2.3
