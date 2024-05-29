@@ -123,24 +123,6 @@ def load_libDef(jlib: Path) -> Dict[str, Any]:
         res['index2Seqs'] = jlib.parent / seqsFn
     return res
 
-def load_index_seqs(fn: Path):
-    """
-    Load sequenes for one barcode from a text file specified in library.json
-
-    Args:
-        full path to the barcode sequence text file
-    
-    Returns:
-        Dict mapping name (e.g. well position) to barcode sequence (or sequence to sequence if no names in the file)
-    """
-    res = {}
-    for l in open(fn):
-        line = l.strip().split()
-        seq = line[0]
-        name = line[1] if len(line) >= 1 else seq
-        res[name] = seq
-    return res
-
 def load_run(runInfo: Path) -> Dict[str, ReadInfo]:
     """
     Function to load read-lengths from RunInfo.xml in Illumina RunFolder

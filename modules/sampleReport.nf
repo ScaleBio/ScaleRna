@@ -19,7 +19,7 @@ output:
 	path("$outDir/figures_internal/*"), optional: true
 	path("$outDir/csv/${sampleId}_unique_transcript_counts_by_RT_Index_well.csv")
 	path("$outDir/csv/${sampleId}_num_cells_by_RT_Index_well.csv")
-publishDir path: "$params.outDir", mode: 'copy'
+publishDir params.outDir, mode: 'copy'
 label 'optional'
 label 'report'
 tag "$id"
@@ -74,7 +74,7 @@ input:
 	path(sampleStats)
 output:
 	path(outFn)
-publishDir "$params.outDir/reports", mode: 'copy'
+publishDir file(params.outDir) / "reports", mode: 'copy'
 label 'optional'
 label 'report'
 script:

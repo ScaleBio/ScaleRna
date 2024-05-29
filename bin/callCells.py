@@ -3,20 +3,24 @@
 Filter barcodes to call cells and generate filtered expression matrix. 
 """
 
-import numpy as np
-import pandas as pd
-import os
 import argparse
+from dataclasses import dataclass
+import os
 from pathlib import Path
 import shutil
 import sys
+from typing import Optional
+
+import numpy as np
+import pandas as pd
 from scipy.io import mmread
 from scipy.stats import median_abs_deviation
-from scipy.sparse import csc_matrix
+from scipy import sparse
+
+from cellFinder import construct_ambient_profile, test_ambiguous_barcodes 
 from scale_utils import io
 from scale_utils.stats import extrapolate_unique
-from dataclasses import dataclass
-from cellFinder import construct_ambient_profile, test_ambiguous_barcodes 
+
 
 @dataclass(frozen=True)
 class CellCallingOptions:
@@ -32,72 +36,62 @@ class CellCallingOptions:
         UTC: The minimum number of unique transcript counts a barcode must be associated with to be considered a called cell.
         cellFinder: If true Cell Finder will be used for cell calling.
         FDR: False discovery rate to use for rescuing cells based on deviation from ambient profile.
+        alpha: Overdispersion parameter for Dirichlet Multinomial distribution. If none, estimated from ambient barcodes.
     """
     fixedCells: bool
     expectedCells: int
     topCellPercent: int
-    minCellRatio: int
+    minCellRatio: float
     minUTC: int
     UTC: int
     cellFinder: bool
     FDR: float
+    alpha: Optional[float]
 
 @dataclass(frozen=True)
 class OutlierOptions:
     """
-    This class holds options for outlier filtering.
-
-    Attributes:
-        filter_outliers: Whether to filter out flagged cells.
-        num_mad_genes: Flag cells with gene counts more than num_mad_genes absolute deviations of the median.
-        num_mad_umis: Flag cells with umi counts more than num_mad_umis absolute deviations of the median.
-        num_mad_mito: Flag cells with higher than num_mad_mito absolute deviations of the median mitochondrial read percentage.
+    Options for flagging / filtering cell outliers based on QC metrics
     """
     filter_outliers: bool
-    num_mad_genes: int
-    num_mad_umis: int
-    num_mad_mito: int
+    reads_mads: float
+    passing_mads: float
+    mito_mads: float
+    mito_min_thres: float = 0.05
 
-def sort_barcodes(total_counts: np.ndarray, options: CellCallingOptions) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def classify_barcodes(total_counts: np.ndarray, options: CellCallingOptions) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    (Subroutine of call_cells). Return arrays of barcode indices that are ambient, ambiguous, and called as cells.
+    Classify cell barcodes into ambient, cell and (optionally) ambiguous,
+    based on total transcript counts per barcode
 
     Args:
         total_counts: Total unique transcript counts for all barcodes
-        options: Options for cell calling
     
     Returns:
         An array of indices for ambient barcodes
-        An array of indices for ambiguous barcodes
-        An array of indices for cell barcodes
+        An array of indices for ambiguous barcodes, if CellFinder is enabled
+        An array of indices for top-cell barcodes
     """
-
-    ambiguous_barcode_indices = []
+    ambiguous_barcode_indices = np.empty(0)
     ambient_barcode_indices = np.where(total_counts < options.minUTC)[0]
     threshold = options.UTC or calculate_UTC_threshold(total_counts, ambient_barcode_indices, options=options)
 
-    #CellFinder Cell Thresholding
     if options.cellFinder:
         cell_barcode_indices = np.where(total_counts >= threshold)[0]
         ambiguous_barcode_indices = np.setdiff1d(np.setdiff1d(np.arange(len(total_counts)), ambient_barcode_indices), cell_barcode_indices)
-        return ambient_barcode_indices, ambiguous_barcode_indices, cell_barcode_indices
-    #Fixed Cell Thresholding
     elif options.fixedCells:
         if options.expectedCells < 0:
             raise ValueError('--expectedCells must be a positive integer.')
         cell_barcode_indices = np.argsort(total_counts)[::-1][:options.expectedCells]
         ambient_barcode_indices = np.setdiff1d(np.arange(len(total_counts)), cell_barcode_indices)
-        return ambient_barcode_indices, ambiguous_barcode_indices, cell_barcode_indices
-    #UTC Cell Thresholding
-    else:
+    else: #'Top-cells" UTC Thresholding
         cell_barcode_indices = np.where(total_counts >= threshold)[0]
         ambient_barcode_indices = np.setdiff1d(np.arange(len(total_counts)), cell_barcode_indices)
-        return ambient_barcode_indices, ambiguous_barcode_indices, cell_barcode_indices
+    return ambient_barcode_indices, ambiguous_barcode_indices, cell_barcode_indices
 
 def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcode_indices: np.ndarray, options: CellCallingOptions) -> int:
     """
-    (Subroutine of sort_barcodes). Calculates the unique transcripts counts
-    threshold above which all barcodes will be called as cells.
+    Calculate the unique transcripts counts threshold above which all barcodes are called as cells
 
     Args:
         total_counts: Total unique transcript counts for all barcodes
@@ -127,122 +121,92 @@ def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcode_indices: n
     # Don't return threshold below minUTC
     return max(threshold, options.minUTC)
 
-def classify_barcodes(sample_specific_file_paths: dict[str, Path], sampleMetrics: Path, options: CellCallingOptions) -> pd.DataFrame:
+def call_cell_barcodes(mtx: Path, sampleMetrics: Path, options: CellCallingOptions) -> pd.DataFrame:
     """
     Call cells in this sample using thresholding options, including optionally
     rescuing ambiguous barcodes as cells with the CellFinder algorithm
 
     Args:
-        sample_specific_file_paths: Dictionary where each key is a custom file identifier and each value is a path to the identified file in the STARsolo output directory
-        sampleMetrics: Path to the allCells.csv containing metrics computed across all barcodes in this sample
+        mtx: Cell-by-gene count matrix file in .mtx format
+        sampleMetrics: allCells.csv containing metrics computed across all barcodes in this sample
         options: Options for cell calling
         
     Returns:
-        The allCells.csv for this sample, with updated columns to show FDR (optionally) and classification (i.e. filters failed, optionally)
+        The allCells.csv for this sample, with updated columns to show cell pass/fail and optional flags
     """
     all_cells = pd.read_csv(sampleMetrics, index_col=0)
-    mtx = csc_matrix(mmread(sample_specific_file_paths['mtx']))
+    mtx = sparse.csc_array(mmread(mtx))
     total_counts = all_cells['umis'].to_numpy()
-
-    ambient_barcode_indices, ambiguous_barcode_indices, cell_barcode_indices = sort_barcodes(total_counts, options=options)
-
-    # If there are ambiguous cells that can be rescued by CellFinder, run CellFinder
-    if options.cellFinder:
-        all_cells['FDR'] = 0.0
-
-    if len(ambiguous_barcode_indices) > 0:
-        discrete_mtx = mtx[:]
-
+    # Classify cells based on 'topCell' threshold
+    # If CellFinder is enabled, 'ambiguous' are the barcodes to test
+    ambient_bcs, ambiguous_bcs, cell_bcs = classify_barcodes(total_counts, options=options)
+    flags = pd.Series('', index=all_cells.index)
+    passed = pd.Series(False, index=all_cells.index)
+    passed.iloc[cell_bcs] = True
+    if len(ambiguous_bcs) > 0: # Run CellFinder
         # Make gene counts discrete so Good-Turing algorithm can work
+        discrete_mtx = mtx[:]
         discrete_mtx.data = np.round(discrete_mtx.data)
-
-        # Disregard irrelevant features; i.e. genes with zero counts
-        discrete_mtx = discrete_mtx[np.where(discrete_mtx.sum(axis = 1).A > 0)[0], :]
-
-        # Construct ambient profile to test barcodes against
-        ambient_profile = construct_ambient_profile(discrete_mtx, ambient_barcode_indices)
-
-        # Add FDR of each barcode to allCells.csv; calling barcodes with FDR <= --FDR as cells
-        FDRs = test_ambiguous_barcodes(discrete_mtx, ambient_profile, ambient_barcode_indices, ambiguous_barcode_indices)
-        FDR_column = mtx.shape[1] * [1.0]
-        for i in range(len(ambiguous_barcode_indices)):
-            FDR_column[ambiguous_barcode_indices[i]] = FDRs[i]
-        for i in range(len(cell_barcode_indices)):
-            FDR_column[cell_barcode_indices[i]] = 0.0
-        all_cells['FDR'] = FDR_column
-        all_cells['classification'] = ['cell' if barcode == True else 'ambient barcode' for barcode in list(all_cells['FDR'] <= options.FDR)]
-
-    else:
-        classification_column = mtx.shape[1] * ['ambient barcode']
-        for cell_barcode_index in cell_barcode_indices:
-            classification_column[cell_barcode_index] = 'cell'
-        all_cells['classification'] = classification_column
-
-    # Call cells according to the specified filters
-    all_cells['pass'] = all_cells['classification'] != 'ambient barcode'
+        # Disregard genes with zero counts
+        discrete_mtx = discrete_mtx[discrete_mtx.sum(axis=1) > 0, :]
+        # Test each ambiguous barcode against the ambient profile
+        ambient_profile = construct_ambient_profile(discrete_mtx, ambient_bcs)
+        FDRs = test_ambiguous_barcodes(discrete_mtx, ambient_profile, ambient_bcs, ambiguous_bcs, alpha=options.alpha)
+        passed.iloc[ambiguous_bcs] = FDRs <= options.FDR
+        flags.iloc[ambiguous_bcs] = flags.iloc[ambiguous_bcs].where(FDRs > options.FDR, other='cellFinder')
+    all_cells['pass'] = passed
+    all_cells['flags'] = flags
     return all_cells
     
-def filter_cells(all_cells: pd.DataFrame, sample: str, options: OutlierOptions) -> pd.DataFrame:
+def filter_cells(all_cells: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
     """
-    Filter cells based on specified median absolute deviation options
-    for gene counts, UMI counts, and mitochondrial read percentage.
-    all_cells (classification and pass columns) is updated in place.
+    Filter cells based on median absolute deviations of various QC metrics
+    'flags' and 'pass' in all_cells are updated in place.
 
     Args:
-        all_cells: A DataFrame of metrics for all barcodes
-        sample: Unique string to identify this sample
+        all_cells: Metrics for all cell-barcodes
         options: Options for outlier filtering
         
     Returns:
         MAD statistics used for flagging cells
     """
-
-    # Fetch group of cells over which to identify outliers (according to median absolute deviation) to filter out
-    cells = all_cells[all_cells['classification'] == 'cell']
-
-    # Flag cells with low or high gene counts relative to other cells
-    gene_counts = cells['genes']
-    minimum_gene_count = np.median(gene_counts) - options.num_mad_genes * median_abs_deviation(gene_counts)
-    maximum_gene_count = np.median(gene_counts) + options.num_mad_genes * median_abs_deviation(gene_counts)
-    all_cells['classification'] += np.where((all_cells['classification'] == 'cell') & (all_cells['genes'] < minimum_gene_count), '; low genes', '')
-    all_cells['classification'] += np.where((all_cells['classification'] == 'cell') & (all_cells['genes'] > maximum_gene_count), '; high genes', '')
-
-    # Flag cells with low or high UMI counts relative to other cells
-    umi_counts = cells['umis']
-    minimum_umi_count = np.median(umi_counts) - options.num_mad_umis * median_abs_deviation(umi_counts)
-    maximum_umi_count = np.median(umi_counts) + options.num_mad_umis * median_abs_deviation(umi_counts)
-    all_cells['classification'] += np.where((all_cells['classification'] == 'cell') & (all_cells['umis'] > maximum_umi_count), '; high umis', '')
-    all_cells['classification'] += np.where((all_cells['classification'] == 'cell') & (all_cells['umis'] < minimum_umi_count), '; low umis', '')
-
-    # Flag cells with high percentage of Mitochondrial reads relative to other cells.
-    mito_pcts = cells['mitoProp']
-    median_mito_pct = np.median(mito_pcts)
-    median_mito_abs_dev = median_abs_deviation(mito_pcts)
-    maximum_mito_pct = median_mito_pct + options.num_mad_mito * median_mito_abs_dev
-    
-    # Flag cells with high percentages of mitochondrial reads relative to other cells
-    all_cells['classification'] += np.where((all_cells['classification'] == 'cell') & (all_cells['mitoProp'] > maximum_mito_pct), '; mitochondrial read percentage', '')
-    
+    cells = all_cells[all_cells['pass']] # Only run outlier filtering on cells (not background)
+    flags = pd.Series('', index=cells.index)
+    stats = []
+    if (options.reads_mads): # Flag cells with low or high total read counts
+        lreads = np.log(cells['reads'])
+        min_lreads = np.median(lreads) - options.reads_mads * median_abs_deviation(lreads)
+        max_lreads = np.median(lreads) + options.reads_mads * median_abs_deviation(lreads)
+        flags[lreads < min_lreads] += ';low_reads'
+        flags[lreads > max_lreads] += ';high_reads'
+        stats.append(('MAD', 'minimum_total_reads', np.round(np.exp(min_lreads))))
+        stats.append(('MAD', 'maximum_total_reads', np.round(np.exp(max_lreads))))
+    if (options.passing_mads): # Flag cells with low fraction passing reads (counted to a gene)
+        preads = cells['passingReads'] / cells['reads']
+        min_preads = max(0, np.median(preads) - options.passing_mads * median_abs_deviation(preads))
+        flags[preads < min_preads] += ';low_passing_reads'
+        stats.append(('MAD', 'minimum_passing_reads', min_preads))
+    if (options.mito_mads): # Flag cells with high fraction mito reads
+        mito = cells['mitoProp']
+        max_mito = max(options.mito_min_thres, np.median(mito) + options.mito_mads * median_abs_deviation(mito))
+        flags[mito > max_mito] += ';high_mito'
+        stats.append(('MAD', 'maximum_mito', max_mito))
     if options.filter_outliers:
-        all_cells['pass'] = all_cells['classification'] == 'cell'
-
-    stats = [
-        ('MAD', 'minimum_gene_count', minimum_gene_count),
-        ('MAD', 'maximum_gene_count', maximum_gene_count),
-        ('MAD', 'minimum_umi_count', minimum_umi_count),
-        ('MAD', 'maximum_umi_count', maximum_umi_count),
-        ('MAD', 'maximum_mito_pct', maximum_mito_pct)
-    ]
+        all_cells.loc[flags.index[flags != ''], 'pass'] = False
+    all_cells.loc[cells.index, 'flags'] += flags
+    all_cells['flags'] = all_cells['flags'].str.strip(';')
     return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
 
 
-def calculate_sample_stats(all_cells: pd.DataFrame, internal_report: bool) -> pd.DataFrame:
+def calculate_sample_stats(all_cells: pd.DataFrame, internal_report: bool, is_cellFinder: bool, filter_outliers:bool) -> pd.DataFrame:
     """
     Calculate sample-level statistics from the all_cells dataframe
 
     Args:
         all_cells: A dataframe containing metrics for all cells in sample
         internal_report: Whether to generate stats consistent with internal report
+        is_cellFinder: Was CellFinder used to call cells?
+        filter_outliers: Were QC flagged celled filtered / failed?
 
     Returns:
         Sample-level statistics
@@ -268,7 +232,15 @@ def calculate_sample_stats(all_cells: pd.DataFrame, internal_report: bool) -> pd
     cells = sample_stats['Cells']
     passing_cells = all_cells.loc[all_cells['pass']]
     cells['cells_called'] = passing_cells.shape[0]
-    cells['utc_threshold'] = passing_cells['umis'].min()
+    if is_cellFinder:
+        cells['cellFinder_calls'] = passing_cells['flags'].str.contains('cellFinder').sum()
+    else:
+        cells['utc_threshold'] = passing_cells['umis'].min()
+    if filter_outliers:
+        cells['qc_filtered'] = all_cells['flags'].str.contains('low_').sum() + all_cells['flags'].str.contains('high_').sum()
+    else:
+        cells['qc_flaged'] = passing_cells['flags'].str.contains('low_').sum() + passing_cells['flags'].str.contains('high_').sum()
+
     cells['mean_passing_reads'] = passing_cells['reads'].mean()
     cells['median_reads'] = passing_cells['passingReads'].median()
     cells['median_utc'] = passing_cells['umis'].median()
@@ -290,10 +262,12 @@ def calculate_sample_stats(all_cells: pd.DataFrame, internal_report: bool) -> pd
         else:
             complexity[f'target_reads_{d}'] = np.nan
     
-    sample_stats_df = pd.DataFrame([], columns=["Category", "Metric", "Value"])
-    for category, metrics in sample_stats.items():
-        sample_stats_df = pd.concat([sample_stats_df, pd.DataFrame([{"Category": category, "Metric": metric, "Value": value} for metric, value in metrics.items()])])
-    return sample_stats_df
+    stats_stats_df = pd.DataFrame([{"Category": category, "Metric": metric, "Value": value} 
+                                       for category, metrics in sample_stats.items()
+                                       for metric, value in metrics.items()
+        ])
+
+    return stats_stats_df
 
 
 def generate_filtered_matrix(sample_specific_file_paths: dict[str, Path], all_cells: pd.DataFrame, sample: str) -> None:
@@ -312,7 +286,7 @@ def generate_filtered_matrix(sample_specific_file_paths: dict[str, Path], all_ce
     filtered_path = f"{sample}_filtered_star_output"
 
     # Create /filtered directory under current directory
-    Path(".", filtered_path).mkdir()
+    Path(".", filtered_path).mkdir(exist_ok=True)
 
     # Features.tsv is the same; we move it to that /filtered directory
     shutil.copyfile(sample_specific_file_paths['features'], f"{filtered_path}/features.tsv")
@@ -403,17 +377,18 @@ def main():
     # Optional arguments for use of CellFinder algorithm
     parser.add_argument("--expectedCells", type = int, required = False, default = 0, help = "Expected number of cells to call (if specified in samples.csv; see algorithm description).")
     parser.add_argument("--topCellPercent", type = int, required = False, default = 99, help = "Cell thresholding parameter (see algorithm description).")
-    parser.add_argument("--minCellRatio", type = int, required = False, default = 10, help = "Cell thresholding parameter (see algorithm description).")
+    parser.add_argument("--minCellRatio", type = float, required = False, default = 10, help = "Cell thresholding parameter (see algorithm description).")
     parser.add_argument("--minUTC", type = int, required = False, default = 100, help = "The minimum number of unique transcript counts a barcode must be associated with to be considered a potential cell.")
-    parser.add_argument("--UTC", type = int, required = False, default = 0, help = "The minimum number of unique transcript counts a barcode must be associated with to be considered a called cell.")
-    parser.add_argument("--cellFinder", required = False, action = "store_true", help = "If set, use CellFinder to call cells from among barcodes with unique transript counts falling between --minUTC and the UTC (set with --UTC or calculated algorithmically when --UTC <= 0).")
-    parser.add_argument("--FDR", type = float, required = False, default = 0.01, help = "False discovery rate at which to call cells (see algorithm description).")
-
-    # Optional arguments for MAD outlier filtering
+    parser.add_argument("--UTC", type=int, default=0, help="Set a fixed unique transcript count threshold for a barcode to be called cell.")
+    # CellFinder parameters
+    parser.add_argument("--cellFinder", action = "store_true", help="Use CellFinder to call cells from among barcodes with counts between --minUTC and the UTC threshold")
+    parser.add_argument("--FDR", type=float, default = 0.001, help="False discovery rate at which to call cells (see algorithm description).")
+    parser.add_argument("--alpha", type=float, default=None, help="Set a fixed overdispersion (Dirichlet alpha) parameter for CellFinder. If none, estimated from ambient barcodes")
+    # MAD outlier filtering
     parser.add_argument("--filter_outliers", required = False, action="store_true", help = "Number of median absolute deviations in gene count/UMI count/mitochondrial read percentage above/below which a cell will be flagged as an outlier.")
-    parser.add_argument("--num_mad_genes", type=int, required = False, action = "store", default= 5, help = "If set, cells with gene counts below --MADs absolute deviations of the median will be filtered out.")
-    parser.add_argument("--num_mad_umis", type=int, required = False, action = "store", default= 5, help = "If set, cells with UMI counts above --MADs absolute deviations of the median will be filtered out.")
-    parser.add_argument("--num_mad_mito", type=int, required = False, action = "store", default= 3, help = "If set, cells with mitochondrial read percentages above --MADs absolute deviations of the median will be filtered out.")
+    parser.add_argument("--madsReads", type=float, default=np.nan, help = "MAD threshold for total reads (+/- X MADs)")
+    parser.add_argument("--madsPassingReads", type=float, default=np.nan, help = "MAD threshold for passing reads fraction (- x MADs)")
+    parser.add_argument("--madsMito", type=float, default=np.nan, help = "MAD threshold for mito. reads (+ x MADs)")
     
     # Optional argument to specify whether to generate statistics for internal report
     parser.add_argument("--internalReport", action="store_true", default=False)
@@ -430,25 +405,28 @@ def main():
         minUTC=args.minUTC,
         UTC=args.UTC,
         cellFinder=args.cellFinder,
-        FDR=args.FDR
+        FDR=args.FDR,
+        alpha=args.alpha
     )
     
     outlier_options = OutlierOptions(
         filter_outliers=args.filter_outliers,
-        num_mad_genes=args.num_mad_genes,
-        num_mad_umis=args.num_mad_umis,
-        num_mad_mito=args.num_mad_mito
+        reads_mads=args.madsReads,
+        passing_mads=args.madsPassingReads,
+        mito_mads=args.madsMito
     )
-    all_cells = classify_barcodes(sample_specific_file_paths, args.sampleMetrics, options=call_cells_options)
-    mad_stats = filter_cells(all_cells, args.sample, options=outlier_options)
-    sample_stats = calculate_sample_stats(all_cells, internal_report=args.internalReport)
+    all_cells = call_cell_barcodes(sample_specific_file_paths['mtx'], args.sampleMetrics, options=call_cells_options)
+    mad_stats = filter_cells(all_cells, options=outlier_options)
+    sample_stats = calculate_sample_stats(all_cells, internal_report=args.internalReport, 
+                                          is_cellFinder=call_cells_options.cellFinder,
+                                          filter_outliers=outlier_options.filter_outliers)
     sample_stats = pd.concat([sample_stats, mad_stats])
 
     # Write filtered matrix for this sample
     generate_filtered_matrix(sample_specific_file_paths, all_cells, args.sample)
 
     metrics_dir = Path(".", f"{args.sample}_metrics")
-    metrics_dir.mkdir(parents = True)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
 
     # Write allCells.csv for this sample
     all_cells.to_csv(metrics_dir / f"{args.sample}_allCells.csv")

@@ -15,11 +15,6 @@ import plotly.express as px
 from scale_utils import reporting
 from scale_utils.base_logger import logger
 
-BARCODE_SHORTHAND_TO_NAME = {
-    'drop': 'Droplet Barcodes', 'P7': 'P7 Barcodes',
-    'lig': 'Ligation Barcodes', 'rt': 'Reverse Transcription Barcodes',
-    'umi': 'UMI'}
-
 def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool, outDir:str):
     """
     Build the library report by calling relevant functions

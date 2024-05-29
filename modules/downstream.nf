@@ -11,19 +11,24 @@ output:
 	tuple(val(sample), path("*_seurat_clustering_results.csv"), emit: results)
 	tuple(val(sample), path("*_SeuratObject.rds"), emit: object)
 	tuple(val(sample), path("*_seurat_cluster_markers.csv"))
+	tuple(val(sample), path("*_bpcells", type: 'dir'))
 tag "$sample"
 label "seuratv5"
 // If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
 // If comparison is false the sample Id is used as the output directory.
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_SeuratObject.rds", mode: 'copy'
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_seurat_clustering_results.csv", mode: 'copy'
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_seurat_cluster_markers.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "*_SeuratObject.rds", mode: 'copy'
+publishDir { out_dir }, pattern: "*_seurat_clustering_results.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "*_seurat_cluster_markers.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
 script:
-if(params.comparison){
-	workflow = "comparison"
-} else {
-	workflow = "standard"
-}
+	out_dir = file(params.outDir) / "cellTyping"
+	if (params.comparison) {
+		workflow = "comparison"
+		out_dir = out_dir / "${sample}_allSamples"
+	} else {
+		workflow = "standard"
+		out_dir = out_dir / sample
+	}
 """
 	seuratClusteringV5.r --project $sample $workflow \
 	--matrixDir $soloOut --allCells $cellReadMetrics
@@ -36,18 +41,23 @@ input:
 output:
 	tuple(val(sample), path("*_azimuth_mapping_results.csv"), emit: results)
 	tuple(val(sample), path("*_AzimuthObject.rds"), emit: object)
+	tuple(val(sample), path("*_bpcells", type: 'dir'))
 tag "$sample"
 label "seuratv5"
 // If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
 // If comparison is false the sample Id is used as the output directory.
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_AzimuthObject.rds", mode: 'copy'
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_azimuth_mapping_results.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "*_AzimuthObject.rds", mode: 'copy'
+publishDir { out_dir }, pattern: "*_azimuth_mapping_results.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
 script:
-if(params.comparison){
-	workflow = "comparison"
-} else {
-	workflow = "standard"
-}
+	out_dir = file(params.outDir) / "cellTyping"
+	if (params.comparison) {
+		workflow = "comparison"
+		out_dir = out_dir / "${sample}_allSamples"
+	} else {
+		workflow = "standard"
+		out_dir = out_dir / sample
+	}
 """
 	azimuthMappingV5.r --reference ${params.azimuthRef} --project $sample \
 	$workflow --matrixDir $soloOut --allCells $cellReadMetrics
@@ -64,9 +74,15 @@ tag "$sample"
 label "reporting"
 // If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
 // If comparison is false the sample Id is used as the output directory.
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "report.html", mode: 'copy', saveAs: {filename -> "${sample}.html"}
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_summary.csv", mode: 'copy'
+publishDir { out_dir }, pattern: "report.html", mode: 'copy', saveAs: {filename -> "${sample}.html"}
+publishDir { out_dir }, pattern: "*_summary.csv", mode: 'copy'
 script:
+	out_dir = file(params.outDir) / "cellTyping"
+	if (params.comparison) {
+		out_dir = out_dir / "${sample}_allSamples"
+	} else {
+		out_dir = out_dir / sample
+	}
 """
 	renderRNADash.r --rmdPath report.rmd --results results.csv --sampleStats sampleStats.csv --comparison $params.comparison
 """
@@ -81,7 +97,7 @@ tag "$sample"
 label "reporting"
 // If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
 // If comparison is false the sample Id is used as the output directory.
-publishDir path: {params.comparison ? "$params.outDir/cellTyping/${sample}_allSamples" : "$params.outDir/cellTyping/$sample"}, pattern: "*_combinedResults.csv", mode: 'copy', saveAs: {filename -> "${sample}_cellTypingResults.csv"}
+publishDir { file(params.outDir) / "cellTyping" / (params.comparison ? "${sample}_allSamples" : sample) }, pattern: "*_combinedResults.csv", mode: 'copy', saveAs: {filename -> "${sample}_cellTypingResults.csv"}
 script:
 """
 	combineDownstreamResults.r --resultsDir ./ --sample $sample
@@ -95,7 +111,7 @@ output:
 	tuple(val(sample), path("*_anndata.h5ad"), emit: annData)
 tag "$sample"
 label "seuratv5"
-publishDir "$params.outDir/samples", pattern: "*_anndata.h5ad", mode: 'copy', saveAs: {filename -> params.comparison ? "${sample}_allSamples.h5ad" : "${sample}.h5ad"}
+publishDir file(params.outDir) / "samples", pattern: "*_anndata.h5ad", mode: 'copy', saveAs: {filename -> params.comparison ? "${sample}_allSamples.h5ad" : "${sample}.h5ad"}
 script:
 mtxDir = soloOut.join(" ")
 """
@@ -105,11 +121,11 @@ mtxDir = soloOut.join(" ")
 
 workflow downstream {
 take:
-samples
-allCells
-filteredMtx
-rawMtx
-sampleStats
+	samples
+	allCells
+	filteredMtx
+	rawMtx
+	sampleStats
 main:
 	// allCells -> [sampleId, path(allCells.csv)]
 	allCells = allCells.map{ tuple(it[0], it[2]) }

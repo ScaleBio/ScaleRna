@@ -36,26 +36,25 @@ script:
 // Run cell finding algorithm and generate filtered expression matrix,
 // also generate sample-level statistics for use in reporting module.
 // libCount is the number of libraries associated with a specific sampleName.
-// This helps us determine if samples are being merged. libCount > 1 == merging. libCount = 1 == no merging.
 process filteredMatrixGeneration {
-tag "$id"
-// If libCount is equal to 1 publishDir = $params.OutDir/samples
-// If libCount is not equal to 1 publishDir = $params.outDir/samples/<sampleName>
-// If params.mergedSamples is true files are renamed <sampleName>.merged.filtered.matrix or <sampleName>.merged.allCells.csv
-// If params.mergedSamples if false files are name <sampleName>.<libName>.filtered.matrix or <sampleName>.<libName>.allCells.csv
-publishDir path: {libCount == 1 ? "${params.outDir}/samples/" : "${params.outDir}/samples/${sampleName}_libraries/"}, pattern:"${id}_filtered_star_output", saveAs: {params.mergedSamples ? "${id}.merged.filtered.matrix" : "${id}.filtered.matrix"}, mode: 'copy'
-publishDir path: {libCount == 1 ? "${params.outDir}/samples/" : "${params.outDir}/samples/${sampleName}_libraries/"}, pattern: "*/${id}_allCells.csv", saveAs: {params.mergedSamples ? "${id}.merged.allCells.csv" : "${id}.allCells.csv"}, mode: 'copy'
-
 input:
 	tuple(val(id), val(sampleName), val(libName), val(expectedCells), path("Solo.out"), val(libCount), path("allCells.csv"))
-	
 output:
 	tuple(val(id), val(libName), path("${id}_metrics/${id}_allCells.csv"), emit: cell_metrics)
 	tuple(val(id), path("${id}_metrics/${id}_sample_stats.csv"), emit: sample_metrics)
 	tuple(val(id), path("${id}_filtered_star_output"), emit: filtered_star_mtx)
 	tuple(val(id), val(libCount), emit: libCount)
-
+tag "$id"
+// If libCount > 1, we organize outputs by library
+// merged samples are published as  <sampleName>.merged.*
+publishDir { outDir }, pattern:"${id}_filtered_star_output", saveAs: { params.mergedSamples ? "${id}.merged.filtered.matrix" : "${id}.filtered.matrix" }, mode: 'copy'
+publishDir { outDir }, pattern: "*/${id}_allCells.csv", saveAs: { params.mergedSamples ? "${id}.merged.allCells.csv" : "${id}.allCells.csv" }, mode: 'copy'
 script:
+	outDir = file(params.outDir) / "samples"
+	if (libCount > 1) {
+		outDir = outDir / "${sampleName}_libraries"
+	}
+
 	opts = ""
 	if (params.cellFinder) {
 		opts = opts + "--cellFinder "
@@ -63,7 +62,7 @@ script:
 			log.warn("Both of the parameters fixedCells and cellFinder are set to true. CellFinder will be used for cell calling.")
 		}
 	}
-	if (params.filter_outliers){
+	if (params.filterOutliers){
 		opts = opts + "--filter_outliers "
 	}
 	if (params.internalReport) {
@@ -76,8 +75,8 @@ script:
 """
 	callCells.py --sampleMetrics allCells.csv --STARsolo_out Solo.out --feature_type $params.starFeature --matrix_type $matrixFn \
 	--sample $id --expectedCells $expectedCells --topCellPercent $params.topCellPercent --minCellRatio $params.minCellRatio \
-	--minUTC $params.minUTC --UTC $params.UTC --FDR $params.cellFinderFdr --num_mad_genes $params.num_mad_genes \
-	--num_mad_umis $params.num_mad_umis --num_mad_mito $params.num_mad_mito $opts
+	--minUTC $params.minUTC --UTC $params.UTC --FDR $params.cellFinderFdr --madsReads $params.madsReads \
+	--madsPassingReads $params.madsPassingReads --madsMito $params.madsMito $opts
 """
 }
 
@@ -90,7 +89,7 @@ input:
 	tuple( val(samples), val(group), path(starDirs) )
 output:
 	tuple(val(group), path(outDir), emit: mergeOut)
-publishDir "$params.outDir/alignment", mode: 'copy'
+publishDir file(params.outDir) / "alignment", mode: 'copy'
 label "report"
 tag "$group"
 script:

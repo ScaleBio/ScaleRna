@@ -10,11 +10,12 @@ The first column is required to be `sample` and contains the name of each sample
 sample | Sample name | Foobar-2
 barcodes | RT-plate wells used for this sample (optional) | 1A-2H
 libName | Name for the overall sequencing library / fastq files (optional) | ScaleRna
-expectedCells | Approximate number of single cells in this sample (optional) | 50000
+expectedCells | Approximate number of cells in this sample (optional) | 50000
 
-* `sample` and `libName` should consist only of letters, numbers, dash (`-`) and dot (`.`)
-* A single `libName` should be used for an entire ScaleRNA sequencing library, not one `libName` per sample loaded into the RT plate.
-* When running from pre-existing fastq file input, `libName` should match the first part of the fastq file name for this sample, e.g.: `Foo1` for `Foo1_*.fastq.gz`.
+* `sample` and `libName` should consist only of letters, numbers and dashes (`-`) and start with a letter.
+* A single `libName` should be used for all samples in a ScaleRNA sequencing library (one final distribution plate); not a different one per sample.
+    * When running from fastq file input, `libName` should match the first part of the fastq file name for this library, e.g.: `ScaleRNA` for `ScaleRNA_*.fastq.gz`.
+    * See [samples.ext.csv](examples/extended-throughput/samples.ext.csv) for an example with two libraries for two extended-throughput plates
 * `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution.
 
 ## Demultiplexing samples

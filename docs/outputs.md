@@ -7,14 +7,13 @@ For detailed information about the library and sample level QC reports see [qcRe
 | Directory | File | Description |
 |-----------|------|-------------|
 | `reports`| `multiqc_report.html` | [MultiQC](https://multiqc.info/) report for fastq generation, fastQC and trimming |
+| | `<sample>.<libName>.report.html` | A standalone report including key QC metrics and figures for each sample; (`merged` for extended throughput runs)|
+| | `<sample>_libraries` | For extended throughput runs, individual sample reports for each plate separately
 | | `allSamples.reportStatistics.csv` | QC metrics from all samples in this analysis in one table
-| | `<sample>.<libName>.report.html` | A standalone report including key QC metrics and figures for each sample |
-| | `<sample>.merged.report.html` | For extended throughput runs, a merged report for each sample across all libraries / plates |
-| | `<sample>_libraries` | For extended throughput runs, individual sample reports for each plate
 | | `csv/` | Summary and QC metrics for this sample in csv format |
-| `reports/library` | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library (potentially multiple samples) |
+| `reports/library` | `library_<libName>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library |
 | | `csv/` | Summary and QC metrics for this library in csv format | 
-|  `samples` | `<sample>.<libName>.filtered/` | Pre-filtered gene expression matrix for cells above the unique read threshold; `merged` for results combined across multiple extended throughput plates |
+|  `samples` | `<sample>.<libName>.filtered.matrix/` | Pre-filtered gene expression matrix for passing cells; `merged` for results combined across multiple extended throughput plates |
 | | `<sample>.<libName>.allCells.csv` | Metrics per cell-barcode, including barcodes / well positions
 | | `<sample>_libraries/` | For extended throughput runs, this contains output files per plate
 | `fastq` | `fastqc/*_fastqc.html` | [fastqc](https://github.com/s-andrews/FastQC) report for each fastq file in the sequencing library |

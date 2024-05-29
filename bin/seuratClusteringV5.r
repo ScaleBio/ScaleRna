@@ -25,14 +25,30 @@ readCountMatrix <- function(mtxDir, mtxName){
 
     genes <- fread(file = genes, header = FALSE)[[2]]
     genes <- make.unique(names = genes, sep = "-")
-    cells <- fread(file = cells, header = FALSE)[[1]]
+    cells <- fread(file = cells, header = FALSE)
+    if(nrow(cells) == 0){
+      message("No Cells in Dataset")
+      quit(save = "no")
+    } else {
+      message(paste0("Cells in Dataset: ", nrow(cells)))
+      cells <- cells[[1]]
+    }
     cells <- paste0(cells, "_", sampleId)
+
+    #Directory name where BPCells will write mtx.
+    bp_dir <- paste0(sampleId, "_bpcells")
 
     mtx <- import_matrix_market(
       mtx_path = mtx,
       row_names = genes,
-      col_names = cells
+      col_names = cells,
+      tmpdir = file.path(bp_dir, "tmp"), #Set tmpdir used by bpcells to ./sampleId_bpcells/tmp
+      outdir = file.path(bp_dir, "out") #Set outdir used by bpcells to ./sampleId_bpcells/out. This is the directory with the final matrix.
     )
+    
+    #Modify dir value in mtx to relative path.
+    #By default BPCells uses absolute paths but this causes issues when trying to move seurat objects.
+    mtx@dir <- file.path(bp_dir, "out")
 
     return(mtx)
 }
@@ -74,9 +90,6 @@ writeReportResults <- function(seuratObject, sketch){
 
   fwrite(x = outDat, file = paste0(outPrefix, "_seurat_clustering_results.csv"))
   saveRDS(object = seuratObject, file = paste0(outPrefix, "_SeuratObject.rds"))
-
-  #SaveSeuratRds(object = seurat, file = paste0(argList$project, "_standard_workflow_seuratRds.RDS"))
-
 }
 
 standardWorkflow <- function(argList){

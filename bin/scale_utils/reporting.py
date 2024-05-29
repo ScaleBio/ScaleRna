@@ -45,6 +45,9 @@ def formatNumericVal(val:int|float) -> str|float:
     # negative numbers
     elif isinstance(val, str) and len(val) != 0 and val[0] == "-" and val[1:].isdigit():
         return f"{int(val):,}"
+    # display nan as NA
+    elif isinstance(val, str) and val.startswith("nan"):
+        return "NA"
     elif isinstance(val, float):
         return round(val, 2)
     else:

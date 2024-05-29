@@ -1,22 +1,19 @@
 # Version 1.5
-## 1.5.0-beta2
-* Fix merged rank plot in library html report
-## 1.5.0-beta
-* Fix behavior of expectedCells and fixedCells
-* Fix mouse background calculation for barnyard runs
-* Add support to output an anndata object
-* When splitFastq is true, output merged bcParser stats with the libName as a prefix in the filename
-* Increased number of retries for all failed jobs and redefined retry strategy for reporting jobs 
-* Added validation to check user supplied arguments against all possible arguments supported in the piopeline
-* Changed barcode rank plot to be a scatter plot from a line plot
-* Cell calling parameter _minReads_ changed to _minUTC_
-* All ScaleBio containers moved to AWS ECR
+* New optional _EmptyDrops_-like cell calling method (`--cellFinder`)
+* Correct up to one `N` basecall per barcode, like other sequencing errors 
+* Rename resource limit parameters (_taskMaxMemory_, _taskMaxCpus_, _taskMaxTime_)
+* Added option to output an anndata object of the cell-count matrix (`--annData`)
+* Updated optional clustering workflow and report (seurat v5-based)
+* Changed threshold settings (_expectedCells_, _fixedCells_, _minUTC_)
+* Separated `pass` and `flags` columns for cell-calling in `allCells.csv`
+* Make `--merge` the default for extended-throughput plate runs
+* Fixed mouse background calculation for barnyard runs
+* Compute mitochondrial fraction based on mapped reads
+* Changed barcode rank plot to support _CellFinder_ calls
 * Simplified parallelism strategy
-* Proportion of mitochondrial reads calculated based on mapped reads now
-* Make --merge the default
-* More stringent CellFinder FDR default of 0.001
-* Adding new optional cell calling method (_CellFinder_)
-* Updated (seurat v5-based) clustering workflow and report
+* Improved task error retry strategy
+* Added more input parameter validations
+* All ScaleBio docker containers moved to AWS ECR
 
 # Version 1.4
 ## 1.4.1

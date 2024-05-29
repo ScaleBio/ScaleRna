@@ -22,6 +22,18 @@ class ParamLogger {
         return camelCase.replaceAll(/([a-z])([A-Z])/, '$1-$2').toLowerCase()
     }
 
+    public static checkArg(arg, str) {
+        if (arg == "") {
+            throwError("Parameter $str has invalid value of ''")
+        }
+        if (arg == true) {
+            throwError("Parameter $str has invalid value of true")
+        }
+        if (arg == false) {
+            throwError("Parameter $str has invalid value of false")
+        }
+    }
+
     // Check required workflow inputs
     public static validateParams(params, log) {
         // PLEASE ADD NEW PARAMETERS TO THE allowed_parameters LIST
@@ -29,12 +41,12 @@ class ParamLogger {
         // use-starthreshold is the correct kebab case
         def allowed_parameters = ['samples', 'genome', 'runFolder', 'fastqDir', 'fastqSamplesheet', 'reporting',
                                   'resultDir', 'outDir', 'bamOut', 'fastqOut', 'libStructure', 'merge', 'splitFastq',
-                                  'bclConvertParams', 'fastqc', 'task_max_memory', 'starFeature', 'starMulti', 'starStrand',
-                                  'trimFastq', 'trimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
-                                  'task_max_memory', 'task_max_cpus', 'task_max_time', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
+                                  'bclConvertParams', 'fastqc', 'starFeature', 'starMulti', 'starStrand', 'trimFastq',
+                                  'trimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
+                                  'taskMaxMemory', 'taskMaxCpus', 'taskMaxTime', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
                                   'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
-                                  'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filter_outliers', 'num_mad_genes',
-                                  'num_mad_umis', 'num_mad_mito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData']
+                                  'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filterOutliers', 'madsReads',
+                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}
@@ -45,9 +57,16 @@ class ParamLogger {
         if (parameter_diff.size() > 1){
             log.warn("[Argument Error] Parameters $parameter_diff are not valid in the pipeline!")
         }
+        def parametersToCheck = ['samples', 'runFolder', 'fastqDir', 'libStructure']
+        parametersToCheck.each { param ->
+            checkArg(params.getProperty(param), param)
+        }
         if (params.samples == null || params.samples == true) {
             throwError("Must specify --samples (e.g. samples.csv)")
         }
+	if (params.fastqDir && params.runFolder) {
+	    throwError("Cannot specify both --runFolder and --fastqDir")
+	}
         if (params.libStructure == null || params.libStructure == true) {
             throwError("Must specify --libStructure (e.g. libV1.1.json)")
         }
@@ -84,8 +103,8 @@ class ParamLogger {
         if (params.reporting) { exec_opts['reporting'] = params.reporting }
         exec_opts['merge'] = params.merge
         exec_opts['splitFastq'] = params.splitFastq
-        exec_opts['task_max_memory'] = params.task_max_memory
-        exec_opts['task_max_cpus'] = params.task_max_cpus
+        exec_opts['taskMaxMemory'] = params.taskMaxMemory
+        exec_opts['taskMaxCpus'] = params.taskMaxCpus
 
         if (params.fastqDir) {
             input_opts['fastqDir'] = params.fastqDir

@@ -64,9 +64,11 @@ def loadDemuxReadCounts(demuxMetrics) {
 process regularizeSamplesCsv {
 input: 
 	path("samples.in.csv")
+	val(libStructName)
+	path(libStructDir)
 output: 
 	path("samples.csv")
-publishDir "${params.outDir}", mode: 'copy'
+publishDir params.outDir, mode: 'copy'
 label 'small'
 cache 'deep'
 script:
@@ -80,8 +82,9 @@ script:
 	if (params.resultDir) {
 		opts += "--resultDir ${params.resultDir} "
 	}
+	libStruct = "${libStructDir}/${libStructName}"
 """
-	regularizeSamplesCsv.py samples.in.csv $opts > samples.csv
+	regularizeSamplesCsv.py samples.in.csv --libraryStruct $libStruct $opts > samples.csv
 """
 }
 
@@ -108,7 +111,7 @@ input:
 output:
 	path("${outDir}/library_${libName}.report.html")
 	path("${outDir}/csv/library_${libName}*.csv")
-publishDir "$params.outDir", mode: 'copy'
+publishDir params.outDir, mode: 'copy'
 label 'report'
 label 'optional'
 tag "$libName"
@@ -134,7 +137,6 @@ workflow sampleReporting {
 take:
 	samples		// each row from samples.csv parsed into a channel
 	samplesCsv  // samples.csv file
-	libStructure // parsed library structure information
 	libJson  // library structure json file
 	genome // Reference genome
 	soloOut // STARsolo output from previous pipeline run
@@ -200,17 +202,17 @@ workflow endToEnd {
 take:
 	samples		// each row from samples.csv parsed into a channel
 	samplesCsv  // samples.csv file
-	libStructure // parsed library structure information
 	libJson  // library structure json file
 	genome // Reference genome
 main:
 	// inputReads gets/generates fastq files and runs bcParser to demux per sample
 	inputReads(samples, samplesCsv, libJson, params.runFolder, params.fastqDir)
+	libJsonContents = loadJson(libJson)
 	// STARSolo
-	alignment(inputReads.out.fqs, libStructure, genome)
+	alignment(inputReads.out.fqs, libJsonContents, genome)
 	//// REPORTING
 	// Per sample QC report
-	sampleReporting(samples, samplesCsv, libStructure, libJson, genome, alignment.out.soloOut, inputReads.out.trimFqStats)
+	sampleReporting(samples, samplesCsv, libJson, genome, alignment.out.soloOut, inputReads.out.trimFqStats)
 
 	// Per library QC report
 	metricsByLib = sampleReporting.out.cellMetrics.map{
@@ -228,14 +230,13 @@ main:
 workflow {
 	// Validate and print key pipeline parameters
 	ParamLogger.initialise(workflow, params, log)
-	// Prepare and load samples.csv
-	regularizeSamplesCsv(file(params.samples, checkIfExists:true))
+	// Compute library structure json path to enable staging in of json file to downstream processes
+	libJson = expandPath(params.libStructure, file(projectDir) / "references")
+	// Fill in samples csv with defaults and workflow specific parameters
+	regularizeSamplesCsv(file(params.samples, checkIfExists:true), libJson.getName(), libJson.getParent())
 	samplesCsv = regularizeSamplesCsv.out
 	samples = samplesCsv.splitCsv(header:true, strip:true)
 	samples.dump(tag:'samples')
-	// Load library structure json and reference genome
-	libJson = expandPath(params.libStructure, file("${projectDir}/references/"))
-	libStructure = loadJson(libJson)
 	genome = loadGenome(file(params.genome, checkIfExists:true))
 
 	if (params.reporting) {
@@ -244,9 +245,9 @@ workflow {
 		// We are skipping read trimming statistics when re-running reporting
 		// Doesn't matter for anything other than the field in the HTML report
 		trimStats = samples.map{ tuple(it.id, []) }
-		sampleReporting(samples, samplesCsv, libStructure, libJson, genome, soloOut, trimStats)
+		sampleReporting(samples, samplesCsv, libJson, genome, soloOut, trimStats)
 	} else {
-		endToEnd(samples, samplesCsv, libStructure, libJson, genome)
+		endToEnd(samples, samplesCsv, libJson, genome)
 	}
 }
 
@@ -292,6 +293,6 @@ workflow.onComplete {
 
 	def json_str = JsonOutput.toJson(manifest_data + workflow_data +params_data+reference_data)
 	def json_beauty = JsonOutput.prettyPrint(json_str)
-	workflow_info = file("$params.outDir/workflow_info.json")
+	workflow_info = file(params.outDir) / "workflow_info.json"
 	workflow_info.write(json_beauty)
 }

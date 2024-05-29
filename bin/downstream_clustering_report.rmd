@@ -25,7 +25,6 @@ if( params$is_comparison ){
     sample_stats <- "None"
 } else {
     sample_stats <- fread(params$sample_stats)
-    rownames(sample_stats) <- sample_stats[["Metrics"]]
 }
 
 azimuthPlots <- ifelse("Azimuth_1" %in% colnames(clusterDat), TRUE, FALSE)
@@ -86,14 +85,32 @@ if(params$is_comparison){
     gene_thresh <- "None"
     umi_thresh <- "None"
 } else {
-    mito_thresh <- as.numeric(sample_stats[Metric == "maximum_mito_pct", 3])
-    gene_thresh <- as.numeric(sample_stats[Metric == "maximum_gene_count", 3])
-    umi_thresh <- as.numeric(sample_stats[Metric == "maximum_umi_count", 3])
+    mito_thresh <- as.numeric(sample_stats[Metric == "maximum_mito", 3])
+    read_thresh <- as.numeric(sample_stats[Metric == "maximum_total_reads", 3])
 }
 
-clusterDat[["outlier_classification"]] <- gsub(pattern = "cell;", x = clusterDat[["classification"]], replacement = "")
-clusterDat[["outlier_classification"]] <- gsub(pattern = "mitochondrial read percentage", x = clusterDat[["outlier_classification"]], replacement = "mito %")
-clusterDat[["outlier_classification"]] <- gsub(pattern = "cell", x = clusterDat[["outlier_classification"]], replacement = " cell")
+# Identify cells without flags.
+# When some cells have flags and others don't, empty flags are converted to empyt strings.
+if( any(nzchar(x = clusterDat$flags) == 0)){
+    # ID empty strings
+    empty_flags <- which(nzchar(x = clusterDat$flags) == 0)
+    clusterDat$flags[empty_flags] <- "NA"
+}
+
+# Identify cells without flags.
+# When all cells of the cells have empty flags the values are interpreted as NAs.
+if( any(is.na(clusterDat$flags))){
+    # ID NA values.
+    na_flags <- which(is.na(clusterDat$flags))
+    clusterDat$flags[na_flags] <- "NA"
+}
+
+# Create custom color pallete for flags so NA values always have a light grey color.
+flag_ids <- unique(clusterDat$flags)
+flag_pal <- scales::hue_pal()(length(flag_ids))
+names(flag_pal) <- flag_ids
+flag_pal[["NA"]] <- "grey75"
+
 
 legend_theme <- theme(legend.text = element_text(size = 7), legend.title = element_text(size = 7), legend.key.size = unit(7, "pt"), legend.title.align = 0, legend.text.align = 0)
 guide_opts_umap <- guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1)))
@@ -112,7 +129,7 @@ plotScatter <- function(dat, xVar, yVar, colorVar, facetVar){
     return(plt)
 }
 
-plotUMAP <- function(dat, xVar, yVar, colorVar, sketched, colorPal = "None"){
+plotUMAP <- function(dat, xVar, yVar, colorVar, sketched, colorPal = FALSE){
 
     pltDat <- dat %>% select(all_of(c(xVar, yVar, colorVar)))
 
@@ -125,7 +142,7 @@ plotUMAP <- function(dat, xVar, yVar, colorVar, sketched, colorPal = "None"){
     } else {
         plt <- plt + geom_point(shape = ".")
     }
-    if(length(colorPal) > 1 ){
+    if(class(colorPal) == "character"){
         plt <- plt + scale_color_manual(values = colorPal)
     }
 
@@ -170,7 +187,7 @@ percentageBar <- function(dat, groupVar, dodgeVar){
     
     return(plt)
 }
-plotStackedBar <- function(dat, groupVar, datVar, colorPal = "None"){
+plotStackedBar <- function(dat, groupVar, datVar, colorPal = FALSE){
 
     pltDat <- dat %>% select(all_of(c(groupVar, datVar)))
     pltDat[[datVar]] <- as.factor(pltDat[[datVar]])
@@ -180,7 +197,7 @@ plotStackedBar <- function(dat, groupVar, datVar, colorPal = "None"){
         theme_classic() + 
         theme(axis.text.x = element_text(angle = -45, hjust = 0))
         
-    if(length(colorPal) > 1 ){
+    if(class(colorPal) == "character"){
         plt <- plt + scale_fill_manual(values = colorPal)
     }
     
@@ -210,11 +227,11 @@ plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "predicted.c
 
 
 ```{r vlnPlotUMIClusters, eval=seuratPlots}
-plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "umis", mad_threshold = umi_thresh) + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of UMIs") + labs(title = "Number of UMIs per Cluster")
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "umis") + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of UMIs") + labs(title = "Number of UMIs per Cluster")
 ```
 
 ```{r vlnPlotGenesCluster, eval=seuratPlots}
-plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "genes", mad_threshold = gene_thresh) + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of Genes") + labs(title = "Number of Genes per Cluster")
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "genes") + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of Genes") + labs(title = "Number of Genes per Cluster")
 ```
 
 ```{r vlnPlotMitoCluster, eval=seuratPlots}
@@ -255,7 +272,7 @@ plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "sample", sk
 ```
 
 ```{r umapOutliers}
-plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "outlier_classification", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Outlier Class.") + labs(title = "UMAP Colored by Outlier Classification")
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "flags", sketched = is_sketch, colorPal = flag_pal) + legend_theme + guide_opts_umap + labs(color = "Flag") + labs(title = "UMAP Colored by Flag")
 ```
 
 ```{r umapRescuedCells, eval=FALSE}
@@ -291,7 +308,7 @@ plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "classificat
 ```
 
 ```{r stackedBarClusterOutliers, eval=seuratPlots}
-plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "outlier_classification") + legend_theme + guide_opts_bar + labs(fill = "Outlier Classification") + xlab("Cluster") + ylab("Proportion") + labs(title = "Outlier Proportion per Seurat Cluster")
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "flags", colorPal = flag_pal) + legend_theme + guide_opts_bar + labs(fill = "Flag") + xlab("Cluster") + ylab("Proportion") + labs(title = "Flag Proportion per Seurat Cluster")
 ```
 
 
@@ -300,7 +317,7 @@ knitr::kable(sample_stats[,-1], format = "html", digits = 2, align = "lcr")
 ```
 
 ```{r outlierTable, include=FALSE}
-tabDat <- clusterDat %>% group_by(sample, classification) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
+tabDat <- clusterDat %>% group_by(sample, flags) %>% summarise(count = n()) %>% mutate(percent = count / sum(count))
 fwrite(tabDat, file = "outlier_summary.csv")
 ```
 

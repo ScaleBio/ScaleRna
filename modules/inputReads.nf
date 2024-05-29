@@ -37,7 +37,7 @@ input:
 	path(runinfo) // RunInfo.xml from Sequencer RunFolder (Read-lengths etc.)
 output: 
 	path("samplesheet.csv")
-publishDir "${params.outDir}/fastq", mode: 'copy'
+publishDir file(params.outDir) / "fastq", mode: 'copy'
 label 'small'
 script:
 	libJson = "$libStructDir/$libStructName"
@@ -59,8 +59,8 @@ input:
 output: 
 	path("fastq/*fastq.gz"), emit: fastq
 	path("fastq/Reports/*"), emit: stats
-publishDir "${params.outDir}/", pattern: 'fastq/Reports/*', mode: 'copy'
-publishDir "${params.outDir}/", pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
+publishDir params.outDir, pattern: 'fastq/Reports/*', mode: 'copy'
+publishDir params.outDir, pattern: 'fastq/*.fastq.gz', enabled: params.fastqOut
 
 
 script:
@@ -100,7 +100,7 @@ input:
 output:
 	path("fastqc/*.html"), emit: html
 	path("fastqc/*.zip"), emit: zip
-publishDir "${params.outDir}/fastq/", mode: 'copy'
+publishDir file(params.outDir) / "fastq", mode: 'copy'
 label 'small'
 tag "${fq.getSimpleName()}"
 """
@@ -116,7 +116,7 @@ input:
 	path(reports)
 output:
 	path("multiqc_report.html")
-publishDir "${params.outDir}/reports", mode: 'copy'
+publishDir file(params.outDir) / "reports", mode: 'copy'
 label 'optional'
 """
 	multiqc .
@@ -142,17 +142,17 @@ output:
 	path("$demuxDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
 	path("$demuxDir/*.tsv")
 	tuple(val(libName), path("$demuxDir/metrics.json"), emit: metrics)
-publishDir "$params.outDir/${dir_name}", pattern: "$demuxDir/*gz", enabled: params.fastqOut
-publishDir "$params.outDir/${dir_name}", mode: 'copy', pattern: "$demuxDir/*{txt,tsv,json}"
+	
+publishDir { file(params.outDir) / dir_name }, pattern: "$demuxDir/*gz", enabled: params.fastqOut
+publishDir { file(params.outDir) / dir_name }, mode: 'copy', pattern: "$demuxDir/*{txt,tsv,json}"
 tag "$libName $count"
 
 script:
 	demuxDir = "${libName}.demux"
 	libStruct = "$libStructDir/$libStructName"
+	dir_name = "barcodes"
 	if (params.splitFastq) {
-		dir_name = "barcodes/bcparser.${libName}.${count}/"
-	} else {
-		dir_name = "barcodes/"
+		dir_name = "$dir_name/bcparser.${libName}.${count}"
 	}
 """
 	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --write-fastq --write-barcode-fq --out $demuxDir
@@ -165,7 +165,7 @@ input:
     path(libJson)
 output:
     tuple(val(libName), path("*metrics.json"))
-publishDir "${params.outDir}/barcodes", mode:'copy'
+publishDir file(params.outDir) / "barcodes", mode:'copy'
 tag "$libName"
 script:
     """

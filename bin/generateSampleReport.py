@@ -72,7 +72,7 @@ def build_sample_report(write_dir: Path, sample_metrics: Path, sample_id: str, i
 
     logger.debug(f"Writing reportStatistics csv, report to {str(write_dir.resolve())}")
     # Change 'nan' back to np.nan in Value column
-    report_stats.replace('nan', np.nan, inplace=True)
+    report_stats.replace(to_replace=['nan', 'nan%'], value=np.nan, inplace=True)
     report_stats.to_csv(write_dir / "csv"/ f"{sample_id}.reportStatistics.csv",
                         index=False, header=False, na_rep='', # can change na_rep to '<NA>' or similar if needed
                         columns=["Category", "Metric", "Value"])
@@ -137,7 +137,7 @@ def score_barn(all_cells: pd.DataFrame, sample_stats: pd.DataFrame):
     all_cells.loc[all_cells['pass'] & (all_cells.human_umis > all_cells.mouse_umis), 'species'] = 'Human'
     all_cells.loc[all_cells['pass'] & (all_cells.mouse_umis > all_cells.human_umis), 'species'] = 'Mouse'
 
-    min_human = min_mouse = sample_stats.loc[('Cells', 'utc_threshold')].Value
+    min_human = min_mouse = all_cells.loc[all_cells['pass'], 'umis'].min()
     if (all_cells.species == 'Human').any() and (all_cells.species == 'Mouse').any():
         min_human = np.percentile(all_cells.human_umis[all_cells.species == 'Human'], 10)
         min_mouse = np.percentile(all_cells.mouse_umis[all_cells.species == 'Mouse'], 10)
@@ -214,7 +214,7 @@ def build_reads_page(sample: str, all_cells: pd.DataFrame, sample_stats: pd.Data
     report_stats = pd.DataFrame({'Category': ['Sample'], 'Metric': ['SampleName'], 'Value': [sample]})
     read_stats = make_read_stats(sample_stats, filtered_short_reads)
     extra_stats = make_extra_read_stats(avg_trimmed_length)
-    cell_stats = make_cell_stats(sample_stats, is_cellfinder='FDR' in all_cells)
+    cell_stats = make_cell_stats(sample_stats)
     complexity_stats = make_complexity_stats(sample_stats)
     report_stats = pd.concat([report_stats, read_stats, extra_stats, cell_stats, complexity_stats])
 
@@ -375,8 +375,7 @@ def make_rank_plot(all_cells: pd.DataFrame, write_dir: Path, sample_id: str, int
     Returns:
         Plot object with the figure
     """
-    # If FDR is a column in all_cells then cellfinder was used for cell calling (No transcript count threshold).
-    is_cellFinder = 'FDR' in all_cells
+    is_cellFinder = all_cells['flags'].fillna("").str.contains('cellFinder').any()
     indices = reporting.sparseLogCoords(all_cells.index.size)
     all_cells = all_cells.sort_values(by=["umis"], ascending=False)
     if is_cellFinder:
@@ -525,13 +524,12 @@ def make_unique_reads_fig(sample_stats: pd.DataFrame)-> dp.Plot:
     return dp.Plot(fig)
 
 
-def make_cell_stats(sample_stats: pd.DataFrame, is_cellfinder: bool) -> pd.DataFrame:
+def make_cell_stats(sample_stats: pd.DataFrame) -> pd.DataFrame:
     """
     Make dataframe of summary stats
 
     Args:
         sample_stats: Sample-level statistics
-        is_cellfinder: Was cellfinder used for cell calling?
     """
     stats = [
         ('Cells', 'Cells Called', f"{sample_stats.loc[('Cells', 'cells_called')].Value:.0f}"),
@@ -540,7 +538,7 @@ def make_cell_stats(sample_stats: pd.DataFrame, is_cellfinder: bool) -> pd.DataF
         ('Cells', 'Median Genes per Cell', f"{sample_stats.loc[('Cells', 'median_genes')].Value:.0f}"),
         ('Cells', 'Reads in Cells', f"{sample_stats.loc[('Cells', 'reads_in_cells')].Value:.1%}"),
     ]
-    if not is_cellfinder:
+    if ('Cells', 'utc_threshold') in sample_stats.index:
         stats.insert(1, ('Cells', 'Unique Transcript Counts Threshold', f"{sample_stats.loc[('Cells', 'utc_threshold')].Value:.0f}"))
     return pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
 
