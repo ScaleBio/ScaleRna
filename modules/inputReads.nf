@@ -208,7 +208,10 @@ main:
 	// fqFiles_with_fastq_matching_key -> (library_name, fastq_matching_key, file)
 	fqFiles = fqs.map { file ->
 		def fname = file.getName().toString()
-		def libName = fname.tokenize('_')[0]
+		def libName = 'ScaleRNA'
+		if (!params.singleLibrary) {
+			libName = fname.tokenize('_')[0]
+		}
 		// Construct matching key to join on later on in the workflow
 		if (params.splitFastq) {
 			return tuple(libName, constructMatchingKey(fname), file)
@@ -258,6 +261,9 @@ main:
 	checkFastq = samples.map{ [it.libName, it.id] }.unique{ it[0] }.join(fqSamples, remainder: true)
 	checkFastq.dump(tag:'checkFastq')
 	checkFastq.map {
+		if (params.singleLibrary && it[0] != 'ScaleRNA') {
+			ParamLogger.throwError("libName has to be default (ScaleRNA) when using --singleLibrary")
+		}
 		// If samples.csv has a library name which does not have corresponding fastq files
 		// then 3rd element of checkFastq will be null
 		if (it[2] == null) {

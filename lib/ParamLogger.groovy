@@ -46,7 +46,7 @@ class ParamLogger {
                                   'taskMaxMemory', 'taskMaxCpus', 'taskMaxTime', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
                                   'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
                                   'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filterOutliers', 'madsReads',
-                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData']
+                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData', 'singleLibrary']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}
