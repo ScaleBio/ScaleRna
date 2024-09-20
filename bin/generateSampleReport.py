@@ -13,7 +13,9 @@ import datapane as dp
 import numpy as np
 import pandas as pd
 from plotly.graph_objects import Figure
+import plotly.graph_objects as go
 import plotly.express as px
+from matplotlib.colors import LinearSegmentedColormap, SymLogNorm
 
 from scale_utils import reporting
 from scale_utils.base_logger import logger
@@ -21,7 +23,8 @@ import re
 
 
 def build_sample_report(write_dir: Path, sample_metrics: Path, sample_id: str, internal_report: bool, is_barnyard: bool,
-                        lib_struct_json: Path, trim_stats: List[Path], metadata:Dict[str, str]):
+                        is_scale_plex: bool, lib_struct_json: Path, trim_stats: List[Path], metadata:Dict[str, str],
+                        hash_metrics: Path=None, hash_stats: Path=None, hash_lib_name: str=None, hash_all_cells: Path=None):
     """
     Entry function for building sample report
 
@@ -31,9 +34,14 @@ def build_sample_report(write_dir: Path, sample_metrics: Path, sample_id: str, i
         sample_id: Unique Sample ID (e.g. `SampleNam.LibName`)
         internal_report: Create additional plots for internal QC
         is_barnyard: Add barnyard plots and metrics
+        is_scale_plex: Add page with hash analysis tables and plots
         lib_struct_json: Library structure json (in directory with sequence files, etc.)
         trim_stats: json files containing cutadapt output
         metadata: Information about the sample and analysis run [FieldName -> Value]
+        hash_metrics: Path to hash metrics file
+        hash_stats: Path to hash stats file
+        hash_lib_name: Name of the hash library
+        hash_all_cells: Path to hash all cells file
     """
     all_cells = pd.read_csv(sample_metrics / "allCells.csv", index_col=0)
     sample_stats = pd.read_csv(sample_metrics / "sample_stats.csv", index_col=['Category', 'Metric'])
@@ -67,6 +75,14 @@ def build_sample_report(write_dir: Path, sample_metrics: Path, sample_id: str, i
         barnyard_page = build_barnyard_page(all_cells, barnyard_stats, write_dir, sample_id, internal_report)
         report_stats = pd.concat([report_stats, barnyard_stats])
         pages.append(barnyard_page)
+    
+    if is_scale_plex:
+        hash_metrics_series = pd.read_csv(hash_metrics, header=None, index_col=0).squeeze(axis=1)
+        assigned_hashes = pd.read_csv(hash_stats, index_col=0)
+        hash_all_cells_df = pd.read_csv(hash_all_cells, index_col=0)
+        scale_plex_page, scale_plex_stats = build_scale_plex_page(hash_lib_name, hash_metrics_series, assigned_hashes, hash_all_cells_df) 
+        report_stats = pd.concat([report_stats, scale_plex_stats])
+        pages.append(scale_plex_page)
 
     report = dp.Report(blocks=pages)
 
@@ -276,6 +292,160 @@ def build_barcodes_page(lib_struct: dict[str, str], lib_struct_dir: Path, all_ce
     return all_index_plots, dp.Page(blocks=blocks_to_render, title="Barcodes")
 
 
+def build_plate_plot(counts:pd.Series) -> dp.Plot:
+    """
+    Build a fixation plate plot for assigned ScalePlex
+
+    Returns:
+        Plot object with the figure
+    """
+    cols = [str(i) for i in range(1,13)] # columns on 96 well plate are 1-12
+    rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] # rows on 96 well plate are A-H
+    wells = [['' for j in cols] for i in rows] # initialize empty 96 well plate
+    for col_idx, j in enumerate(cols):
+        for row_idx, i in enumerate(rows):
+            current_well = f"{j}{i}"
+            wells[row_idx][col_idx] = counts[current_well] if current_well in counts else 0
+    max_val = np.max(wells)
+
+    # Create a custom colormap
+    colors = [(0, 0, 0), (128/255, 170/255, 255/255)]  # RGB values for black and shade of blue
+    positions = [0, 1]  # Corresponding positions for 0 and 1 in the colormap
+    cmap = LinearSegmentedColormap.from_list('CustomColormap', list(zip(positions, colors)))
+    # Log-transform the colormap
+    norm = SymLogNorm(linthresh=1.0, vmin=0, vmax=max(10, max_val), clip=True)
+    # Create plotly compatible colorscale
+    # https://plotly.github.io/plotly.py-docs/generated/plotly.graph_objects.Heatmap.html
+    positions = np.linspace(0, max_val, 256)
+    colors = ['rgb'+str((int(r*255), int(g*255), int(b*255))) for r, g, b, _ in cmap(norm(positions))]
+    colorscale = list(zip(np.linspace(0, 1, 256), colors))
+    
+    # create custom tickvals
+    tickvals = [0]
+    ticktext = ["0"]
+    if max_val != 0:
+        nztickvals = [10**i for i in range(0, int(np.ceil(np.log10(max_val))))]
+        nzticktext = [f"10<sup>{i}</sup>" for i,_ in enumerate(nztickvals)]
+        # take last two tick labels because otherwise the lower ones bunch up together
+        tickvals += nztickvals[-2:]
+        ticktext += nzticktext[-2:]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=wells[::-1],
+        x=cols,
+        y=rows[::-1],
+        hoverongaps = False,
+        hovertemplate = 'Well: %{x}%{y}<br>Cells: %{z}<extra></extra>',
+        colorscale=colorscale,
+        colorbar=dict(
+            title="Cells",
+            tickvals=tickvals,
+            ticktext=ticktext
+        ),
+        xgap = 1,
+        ygap = 1,
+        zmin = 0,
+        zmax = max_val
+    ))
+    # Update layout to change axis font size
+    fig.update_layout(
+        title=dict(
+            text="Fixation Plate Assigned ScalePlex<br><sub>Cells called per well</sub>",
+            y=0.9,
+            x=0.5,
+            xanchor='center',
+            yanchor='top',
+            font=dict(size=20)
+        ),
+        xaxis=dict(
+            tickfont=dict(size=15),
+            side='top'
+        ),
+        yaxis=dict(
+            tickfont=dict(size=15)
+        ),
+    )
+    return dp.Plot(fig)
+
+
+def build_scale_plex_page(lib_name: str, hash_metrics_series: pd.Series, assigned_hashes: pd.Series, hash_all_cells_df: pd.DataFrame) -> tuple[dp.Page, pd.DataFrame]:
+    """
+    Build a datapane page displaying hash metrics
+
+    Args:
+        lib_name: Hash lib name
+        hash_metrics_series: Sample-level hash metrics
+        assigned_hashes: Frequency counts of assigned hashes
+        hash_all_cells_df: Cell-level metrics
+
+    Returns:
+        datapane page
+        DataFrame with hash metrics
+    """
+    stats = [
+        ('ScalePlex', 'Library Name', lib_name),
+        ('ScalePlex', 'Mean Reads per Cell', hash_metrics_series['ReadsPerCell']),
+        ('ScalePlex', 'Median Unique ScalePlex Counts per Cell', hash_metrics_series['nUMIPerCell']),
+        ('ScalePlex', 'Percent of Cells with Assigned ScalePlex', hash_metrics_series['passingPercent']),
+        ('ScalePlex', 'Saturation', hash_metrics_series['saturation']),
+        ('ScalePlex', 'Reads in Cells', hash_metrics_series['readsInCells']),
+    ]
+    stats_df = pd.DataFrame.from_records(stats, columns=['Category', 'Metric', 'Value'])
+    hash_table = reporting.create_metric_table(stats_df, title="ScalePlex Metrics")
+
+    fig = px.bar(assigned_hashes['cells_called'], title="Assigned ScalePlex Cell Counts",
+                 labels={'value':'Cell Counts', 'index':''}, template=reporting.DEFAULT_FIGURE_STYLE)
+    fig.update_traces(hovertemplate = 'Well: %{x}<br>Cells: %{y}<extra></extra>')
+    fig.update_layout(
+        showlegend=False,
+        autosize=False,
+        margin=dict(
+            l=50,  # left margin
+            r=50,  # right margin
+            b=150,  # bottom margin
+            t=50,  # top margin
+            pad=10  # padding
+        )
+    )
+    fig.update_xaxes(tickangle=-90, title_text='Assigned ScalePlex')
+    
+    saturation_scatter = build_saturation_scatter(hash_all_cells_df)
+    
+    toptwo = px.histogram(x=hash_all_cells_df.loc[hash_all_cells_df['pass'], 'topTwo'], title='Top ScalePlex Fraction', histnorm='percent',
+                       template=reporting.DEFAULT_FIGURE_STYLE)
+    toptwo.update_layout(
+        yaxis_title="% Cells",
+        xaxis_title=""
+    )
+    toptwo.update_xaxes(range=[0, 1])
+    
+    fixation_qc_plot = build_plate_plot(hash_all_cells_df['assigned_scaleplex'].value_counts())
+
+    error_stats = [
+        ('ScalePlex', 'Max Fail', hash_metrics_series['maxFailPercent']),
+        ('ScalePlex', 'Enrich Fail', hash_metrics_series['enrichFailPercent']),
+        ('ScalePlex', 'Unexpected', hash_metrics_series['unexpectedPercent']),
+        ('ScalePlex', 'Indeterminate', hash_metrics_series['indeterminatePercent']),
+    ]
+    error_stats_df = pd.DataFrame.from_records(error_stats, columns=['Category', 'Metric', 'Value'])
+    assignment_error_table = reporting.create_metric_table(error_stats_df, title="ScalePlex Assignment Errors")
+    
+    # create per-assigned scaleplex metrics table
+    # first sort by well position and then reset_index to bring well into a column
+    assigned_hashes = assigned_hashes.sort_index(key=lambda x: x.str.extract('(\d+)(\D+)', expand=True).apply(lambda x: (int(x[0]), x[1]), axis=1))
+    assigned_hashes_styled = assigned_hashes.reset_index().style.pipe(reporting.styleTable, title="Per-well ScalePlex RNA Metrics",
+                                                        numericCols=['passing_reads', 'cells_called', 'mean_passing_reads', 'median_utc'],
+                                                        boldColumn='assigned_scaleplex')
+    assigned_hashes_styled = assigned_hashes_styled.relabel_index(
+        ['Well', 'Passing Reads', 'Cells Called', 'Mean Passing Reads', 'Median Unique Transcript Counts', 'Median Genes'], axis=1)
+    scaleplex_stats_table = reporting.make_table(assigned_hashes_styled)
+
+    group_blocks = [hash_table, dp.Plot(fig), saturation_scatter, dp.Plot(toptwo), fixation_qc_plot, assignment_error_table, scaleplex_stats_table]
+    page = dp.Page(dp.Group(blocks=group_blocks, columns=2), title="ScalePlex")
+
+    return page, pd.concat([stats_df, error_stats_df])
+
+
 def build_dist(title: str, field: str, label: str, all_cells: pd.DataFrame) -> dp.Plot:
     """
     Build histogram for a given field divided by mapped reads
@@ -354,11 +524,17 @@ def build_saturation_scatter(all_cells: pd.DataFrame)-> dp.Plot:
         Plot object with the figure
     """
     all_cells["plt_color"] = all_cells["pass"].map({True:"Cell", False:"Background"})
-    fig = px.scatter(subsample_all_cells(all_cells), x="reads", y="Saturation", color = "plt_color",
+    sample_all_cells = subsample_all_cells(all_cells)
+    fig_bg = px.scatter(sample_all_cells[~sample_all_cells['pass']], x="reads", y="Saturation", color = "plt_color",
                      labels={"reads": "Total reads", "plt_color":""}, template=reporting.DEFAULT_FIGURE_STYLE,
                      color_discrete_map=reporting.SCATTER_COLORMAP, title="Saturation Per Cell", log_x=False,
                      category_orders={"plt_color":["Cell", "Background"]}, opacity=0.5)
-
+    fig_pass = px.scatter(sample_all_cells[sample_all_cells['pass']], x="reads", y="Saturation", color = "plt_color",
+                     labels={"reads": "Total reads", "plt_color":""}, template=reporting.DEFAULT_FIGURE_STYLE,
+                     color_discrete_map=reporting.SCATTER_COLORMAP, title="Saturation Per Cell", log_x=False,
+                     category_orders={"plt_color":["Cell", "Background"]}, opacity=0.5)
+    fig = Figure(data=fig_bg.data + fig_pass.data,
+                 layout=fig_bg.layout)
     return dp.Plot(fig)
 
 
@@ -564,10 +740,15 @@ def main():
     parser.add_argument("--outDir", required=True, type=Path, help="Output directory")
     parser.add_argument("--sampleId", required=True, help="Unique ID of the sample during the workflow (e.g. SampleName.LibName)")
     parser.add_argument("--sampleMetrics", required=True, type=Path)
+    parser.add_argument("--scalePlexMetrics", required=False, type=Path)
+    parser.add_argument("--scalePlexAllCells", required=False, type=Path)
+    parser.add_argument("--scalePlexStats", required=False, type=Path)
+    parser.add_argument("--scalePlexLibName", required=False, type=str)
     parser.add_argument("--libraryStruct", required=True, type=Path)
     parser.add_argument("--trim_stats", nargs='+', type=Path)
     parser.add_argument("--internalReport", action="store_true", default=False)
     parser.add_argument("--isBarnyard", action="store_true", default=False)
+    parser.add_argument("--isScalePlex", action="store_true", default=False)
     parser.add_argument('--sampleName', help='Metadata for report')
     parser.add_argument("--libName", default='NA', help='Metadata for report')
     parser.add_argument("--barcodes", default='NA', help='Metadata for report' )
@@ -582,7 +763,20 @@ def main():
         'Analysis Date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M'),
         'Library Structure': args.libraryStruct.stem,
     }
-    build_sample_report(args.outDir, args.sampleMetrics, args.sampleId, args.internalReport, args.isBarnyard, args.libraryStruct, args.trim_stats, metadata)
+    build_sample_report(
+        write_dir=args.outDir,
+        sample_metrics=args.sampleMetrics,
+        sample_id=args.sampleId,
+        internal_report=args.internalReport,
+        is_barnyard=args.isBarnyard,
+        is_scale_plex=args.isScalePlex,
+        lib_struct_json=args.libraryStruct,
+        trim_stats=args.trim_stats,
+        metadata=metadata,
+        hash_metrics=args.scalePlexMetrics,
+        hash_stats=args.scalePlexStats,
+        hash_lib_name=args.scalePlexLibName,
+        hash_all_cells=args.scalePlexAllCells)
 
 if __name__ == "__main__":
     main()

@@ -15,7 +15,7 @@ import plotly.express as px
 from scale_utils import reporting
 from scale_utils.base_logger import logger
 
-def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool, outDir:str):
+def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path, internalReport:bool, scalePlexLib:bool, outDir:str):
     """
     Build the library report by calling relevant functions
 
@@ -44,13 +44,13 @@ def buildFastqReport(libName:str, libJson:Path, demuxJson:Path, libMetrics:Path,
     # creates a dataframe that has the number of reads that passed and the number
     # of reads that have different errors;
     # creates a matplotlib plate plot for reads per rt well
-    (overallPassingStats, readsPage, barcodeReadStatsInternal) = buildReadsPage(demuxMetrics, allCellsBetweenFiles, libName)
+    (overallPassingStats, readsPage, barcodeReadStatsInternal) = buildReadsPage(demuxMetrics, allCellsBetweenFiles, libName, scalePlexLib)
 
     # Call function that builds a datapane page that depicts a table with barcode
     # related information and plate plots that show reads per rt well, reads per
     # pcr well and reads per ligation well and also creates a dataframe with
     # information related to each barcoding level
-    (barcodeStatsDf, cellsPage, barcodeTypeStats) = buildBarcodesPage(demuxMetrics, libName, libJson, allCellsBetweenFiles, writeDir)
+    (barcodeStatsDf, cellsPage, barcodeTypeStats) = buildBarcodesPage(demuxMetrics, libName, libJson, scalePlexLib, allCellsBetweenFiles, writeDir)
 
     pages = [readsPage, cellsPage]
     if internalReport:
@@ -93,16 +93,8 @@ def buildDfForPlatePlot(allCellsBetweenFiles:pd.DataFrame, libJson:Path, bcName:
     else:
         raise ValueError(f"Unknown barcode {bcName}")
     
-    wells = {}
-    with open(libStructDir / f'{bcInfo["sequences"]}') as f:
-        for line in f:
-            line = line.strip()
-            split_line = line.split("\t")
-            wells[split_line[0]] = split_line[1]
-
     alias = bcInfo.get('alias') or bcInfo['name']
-    barcode_list = allCellsBetweenFiles[alias].to_list()
-    well_list = [wells[x] for x in barcode_list]
+    well_list = allCellsBetweenFiles[f"{alias}_alias"].to_list()
     max_letter, max_number = reporting.getMaxWellNumberAndLetter(libStructDir / f'{bcInfo["sequences"]}')
     allCellsBetweenFiles[f'{alias.lower()}_well'] = well_list
     well_df = pd.DataFrame(0, columns=range(1, max_number+1), index=reporting.getCharacterIndices(65, ord(max_letter)+1))
@@ -115,7 +107,7 @@ def buildDfForPlatePlot(allCellsBetweenFiles:pd.DataFrame, libJson:Path, bcName:
     
     return well_df
 
-def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, allCellsBetweenFiles:pd.DataFrame, writeDir:Path):
+def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, scalePlexLib:bool, allCellsBetweenFiles:pd.DataFrame, writeDir:Path):
     """
     Function that builds a datapane page that depicts a table with barcode
     related information and plate plots that show reads per rt well, reads per
@@ -126,6 +118,7 @@ def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, allCellsBetween
         demuxJson: Dictionary with the demuxed metrics
         libName: Library name
         libJson: Library Structure Json
+        scalePlexLib: True if a ScalePlex library
         allCellsBetweenFiles: All cell information for this library
         writeDir: Write directory
 
@@ -134,21 +127,22 @@ def buildBarcodesPage(demuxJson:Dict, libName:str, libJson:Path, allCellsBetween
     """
 
     (barcodeTypeStatsDf, barcodeTypeStats) = createBarcodeTypeMetricsTables(demuxJson, libJson)
+    y_axis_label = "Unique ScalePlex Counts" if scalePlexLib else "Unique Transcript Counts"
 
     ligation_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "lig")
     ligation_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_ligation_well.csv")
     # Matplotlib figure that represents umi count per well for ligation
-    ligationPerWell = reporting.buildPlatePlot(ligation_well_df, "Ligation Plate", 10000.0, "Unique Transcript Counts")
+    ligationPerWell = reporting.buildPlatePlot(ligation_well_df, "Ligation Plate", 10000.0, y_axis_label)
 
     pcr_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "pcr")
     pcr_well_df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_pcr_well.csv")
     # Matplotlib figure that represents umi count per well for pcr
-    pcrPerWell = reporting.buildPlatePlot(pcr_well_df, "PCR Plate", 10000.0, "Unique Transcript Counts")
+    pcrPerWell = reporting.buildPlatePlot(pcr_well_df, "PCR Plate", 10000.0, y_axis_label)
     
     rt_well_df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, "rt")
     rt_well_df.to_csv(writeDir / "csv"/ f"library_{libName}_unique_reads_rt_well.csv")
     # Matplotlib figure that represents umi count per well for rt
-    readPerWell = reporting.buildPlatePlot(rt_well_df, "RT Plate", 10000.0, "Unique Transcript Counts")
+    readPerWell = reporting.buildPlatePlot(rt_well_df, "RT Plate", 10000.0, y_axis_label)
 
     blocks = [dp.Text(f"## libName: {libName}"),
               readPerWell, ligationPerWell, pcrPerWell]
@@ -188,7 +182,7 @@ def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Path):
     return (barcodesDf, dp.Group(blocks=tableGroup, columns=2))
 
 
-def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
+def buildReadsPage(demuxJson, allCellsBetweenFiles, libName, scalePlexLib):
     """
     Function to build a datapane page for reads
 
@@ -196,11 +190,13 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
         demuxJson (dict): Dictionary with demuxed metrics
         allCellsBetweenFiles (pd.DataFrame): Dataframe containing data from all samples
         libName (str): Library name
+        scalePlexLib (bool): True if ScalePlex library
 
     Returns:
         Dataframe with barcode reads information and dp.Page object
     """
-    multiSampleKneePlot, allCellsBetweenFiles = makeMultisampleKneePlot(allCellsBetweenFiles)
+    if not scalePlexLib:
+        multiSampleKneePlot, allCellsBetweenFiles = makeMultisampleKneePlot(allCellsBetweenFiles)
 
     barcodeReadsData = demuxJson['reads']
     
@@ -210,8 +206,8 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
     barcodeReadsTotal = barcodeReadsTotal[['Type', 'Reads']]
     barcodeReadsTotal.rename(columns={'Type': 'Status'}, inplace=True)
     barcodeReadsTotal['Percent'] = barcodeReadsPerc['Reads']
-    
-    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(reporting.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    table_title = "ScalePlex Read Status" if scalePlexLib else "Barcode Read Status"
+    barcodeReadsTotalStyledInternal = barcodeReadsTotal.style.pipe(reporting.styleTable, title=table_title, numericCols=['Reads'])
 
     total_reads = 0
     total_percent = 0
@@ -221,7 +217,17 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
         total_percent += float(row["Percent"][:-1])
     df_pass = barcodeReadsTotal[barcodeReadsTotal["Status"].str.contains("Pass")]
     df_pass.loc[len(df_pass.index)] = ['Error', total_reads, str(round(total_percent, 1))+"%"]
-    barcodeReadsTotalStyled = df_pass.style.pipe(reporting.styleTable, title="Barcode Read Status", numericCols=['Reads'])
+    if scalePlexLib:
+        barcodeHashReads = demuxJson['barcodes']['scaleplex']
+        hash_error_reads = barcodeHashReads['Ambiguous'][0] + barcodeHashReads['NoMatch'][0]
+        hash_error_perc = float(barcodeHashReads['Ambiguous'][1].strip('%')) + float(barcodeHashReads['NoMatch'][1].strip('%'))
+        hash_error = {
+            'Status': 'ScalePlex Error',
+            'Reads': hash_error_reads,
+            'Percent': f"{hash_error_perc:.1f}%"
+            }
+        df_pass = df_pass.append(hash_error, ignore_index=True)
+    barcodeReadsTotalStyled = df_pass.style.pipe(reporting.styleTable, table_title, numericCols=['Reads'])
     
     barcodeReadStats = reporting.make_table(barcodeReadsTotalStyled)
     barcodeReadStatsInternal = reporting.make_table(barcodeReadsTotalStyledInternal)
@@ -251,9 +257,13 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName):
         template=reporting.DEFAULT_FIGURE_STYLE,
         title="Reads Per Sample", labels={"TotalReads": "Total Reads"})
     readsPerSample.update_layout(showlegend=False)
+    if not scalePlexLib:
+        first_group = dp.Group(multiSampleKneePlot, barcodeReadStats, columns=2)
+    else:
+        first_group = dp.Group(barcodeReadStats, columns=1)
 
     readsPage = dp.Page(blocks=[dp.Text(f"## libName: {libName}"),
-                       dp.Group(multiSampleKneePlot, barcodeReadStats, columns=2),
+                       first_group,
                        dp.Group(readsPerSample, columns=1)], title='Reads')
     return (barcodeReadsTotal, readsPage, barcodeReadStatsInternal)
 
@@ -369,10 +379,11 @@ def main():
     parser.add_argument("--libMetrics", required=True, type=Path)
     parser.add_argument("--demuxMetrics", required=True, type=Path, help="bcParser demux metrics json")
     parser.add_argument("--internalReport", action="store_true", default=False)
+    parser.add_argument("--scalePlexLib", action="store_true", default=False)
     
     args = parser.parse_args()
 
-    buildFastqReport(args.libName, args.libStruct, args.demuxMetrics, args.libMetrics, args.internalReport, args.outDir)
+    buildFastqReport(args.libName, args.libStruct, args.demuxMetrics, args.libMetrics, args.internalReport, args.scalePlexLib, args.outDir)
 
 if __name__ == "__main__":
     main()

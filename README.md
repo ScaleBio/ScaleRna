@@ -37,6 +37,9 @@ The workflow produces per-sample and per-library ScaleBio demultiplexed reads (`
 ## Extended Throughput Kit
 To analyze data from multiple final distribution plates in the extended throughput kit, see [Extended Throughput](docs/extendedThroughput.md)
 
+## ScalePlex
+To analyze your ScaleRNA sequencing data with ScalePlex labeling and assignment, see [ScalePlex](docs/scalePlex.md)
+
 ## Workflow Execution
 ### Workflow test
 A small test run, with all input data stored online, can be run with the following command:

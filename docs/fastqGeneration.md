@@ -19,11 +19,17 @@ For ScaleBio RNA libraries the RT and ligation cell-barcodes are included in rea
 `CreateFastqForIndexReads,1`
 
 # Using Fastq Files as Workflow Input
-Set `--fastqDir` to the directory containing the fastq files. 
-The file names should follow the pattern `<Name>_..._<Read>_...fastq.gz`, where
-* `Name` is the library name (`ScaleRNA` by default, can be set in the `libName` or `libIndex` column in `samples.csv`)
-    * Only the first part of `Name` in the fastq file-name has to match `libName` from `samples.csv; e.g. Name = `RNA-A-AP1_A1` and libName = `RNA-A-AP1`. This allows having multiple input fastq files for each library
-* `Read` is one of `R1`, `R2`, `I1`, `I2`
+Set `--fastqDir` to the directory containing the fastq files. All the fastq files need to be present in this direcotyr or its subdirectories. 
 
-This can be achieved by matching the `sample_ID` in the Illumina _bcl-convert_ _samplesheet.csv_ to the `libName` in the ScaleBio `samples.csv`.
+FASTQ FILE NAMES: The names must follow this pattern `<libName>_..._<R1/R2/I1/I2>_...fastq.gz`
 
+Read through the following checkpoints to ensure your fastq files names are correctly formatted:
+
+* `libName` is the library name (`ScaleRNA` by default) and fastq files must contain the `libName` as a prefix up until the first underscore (`ScaleRNA_...<R1/R2/I1/I2>...fastq.gz`) of the `samples.csv`.
+
+* Only the first part of `libName` in the fastq file-name has to match `libName` column from `samples.csv`
+* e.g. fastq file name = `ScaleRNA_AXHGN18SWA_L001_R1.001.fastq.gz` and libName = `ScaleRNA`. This allows having multiple input fastq files for each library
+
+* Generating fastqs with the `libName` prefix can be accomplished with the `sample_ID` column in the Illumina _bcl-convert_ _samplesheet.csv_. Copy the `sample_ID` name prefix up until the first underscore and add to the `libName` column in the ScaleBio `samples.csv`.
+
+* `I1` and `I2` are index reads (i7 and i5, respectively) in fastq format.

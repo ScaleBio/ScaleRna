@@ -32,6 +32,7 @@ def constructMatchingKey(fname) {
 process makeBclConvertSamplesheet {
 input: 
 	path(samplesCsv)
+	val(hashLibNames) // Hash libraries
 	path(libStructDir) // Directory containing the library structure definition (barcode sequence lists are loaded from here)
 	val(libStructName) // Filename of the library structure definition .json
 	path(runinfo) // RunInfo.xml from Sequencer RunFolder (Read-lengths etc.)
@@ -40,14 +41,27 @@ output:
 publishDir file(params.outDir) / "fastq", mode: 'copy'
 label 'small'
 script:
-	libJson = "$libStructDir/$libStructName"
+	numHashRows = hashLibNames.size()
+	libStruct = "$libStructDir/$libStructName"
+	hashlibStruct = "$libStructDir/${params.scalePlexLibStructure}"
 	opts = ""
 	if (params.splitFastq) {
 		opts += "--splitFastq "
 	}
-"""
-	bclConvertSheet.py $samplesCsv $libJson $runinfo $opts > samplesheet.csv
-"""
+	if (params.scalePlex)
+		"""
+			# create RNA samplesheet
+			awk -F',' 'NR <= $numHashRows + 1' $samplesCsv > rna_samples.csv
+			bclConvertSheet.py rna_samples.csv $libStruct $runinfo $opts > samplesheet.csv
+			# create Hash samplesheet
+			awk -F',' 'NR==1 || NR > $numHashRows + 1' $samplesCsv > hash_samples.csv
+			# run bclConvertSheet.py and append the output without header info to samplesheet.csv
+			bclConvertSheet.py hash_samples.csv $hashlibStruct $runinfo $opts | awk '/\\[Data\\]/,EOF { print \$0 }' | sed '1,2d' >> samplesheet.csv
+		"""
+	else
+		"""
+			bclConvertSheet.py $samplesCsv $libStruct $runinfo $opts > samplesheet.csv
+		"""
 }
 
 /*Run bcl-convert, used when starting from a sequencing run-folder
@@ -86,9 +100,10 @@ tag "$id $count"
 script:
 	transName = transFastq.getName()
 	bcName = bcFastq.getName()
+	trimAdaptParam = params.scalePlex ? "${params.trimAdapt} ${params.scalePlexTrimAdapt}" : params.trimAdapt
 """
 	mkdir trimmed
-	cutadapt -j$task.cpus -e0.15 -O2 -m16 $params.trimAdapt -o trimmed/$transName -p trimmed/$bcName $transFastq $bcFastq --json ${id}.trim_stats.json | tee ${id}.${count}.trim_stats
+	cutadapt -j$task.cpus -e0.15 -O2 -m16 $trimAdaptParam -o trimmed/$transName -p trimmed/$bcName $transFastq $bcFastq --json ${id}.trim_stats.json | tee ${id}.${count}.trim_stats
 """
 }
 
@@ -129,6 +144,8 @@ process barcodeParser {
 input:
 	// samples.csv
 	path(sheet)
+	// List of hash libraries, [] if not --scalePlex
+	val(hashLibNames)
 	// Directory containing the library structure definition (barcode sequence lists are loaded from here)
 	path(libStructDir)
 	// Filename of the library structure definition .json
@@ -142,6 +159,8 @@ output:
 	path("$demuxDir/*_S0_*.fastq.gz"), emit: unknown, optional: true
 	path("$demuxDir/*.tsv")
 	tuple(val(libName), path("$demuxDir/metrics.json"), emit: metrics)
+	tuple(val(libName), path("$demuxDir/*.barcodes.csv"), emit: barcodesCsv, optional: true)
+
 	
 publishDir { file(params.outDir) / dir_name }, pattern: "$demuxDir/*gz", enabled: params.fastqOut
 publishDir { file(params.outDir) / dir_name }, mode: 'copy', pattern: "$demuxDir/*{txt,tsv,json}"
@@ -150,26 +169,44 @@ tag "$libName $count"
 script:
 	demuxDir = "${libName}.demux"
 	libStruct = "$libStructDir/$libStructName"
-	dir_name = "barcodes"
+	opts = ""
+	if (params.scalePlex && libName in hashLibNames) {
+		opts += "--barcode-info"
+		libStruct = "$libStructDir/${params.scalePlexLibStructure}"
+		dir_name = "scaleplex/demux"
+	} else {
+		opts += "--write-fastq --write-barcode-fq"
+		dir_name = "barcodes"
+	}
 	if (params.splitFastq) {
 		dir_name = "$dir_name/bcparser.${libName}.${count}"
 	}
 """
-	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --write-fastq --write-barcode-fq --out $demuxDir
+	bc_parser --lib-struct $libStruct --demux $sheet --lib-name $libName -v --reads ${fqFiles.join(" ")} --out $demuxDir $opts
 """
 }
 
 process merge_demux {
 input:
     tuple(val(libName), path("demux_metrics*.json"))
-    path(libJson)
+	// List of hash libraries, [] if not --scalePlex
+	val(hashLibNames)
+	path(libStructDir)
+    val(libStructName)
 output:
     tuple(val(libName), path("*metrics.json"))
-publishDir file(params.outDir) / "barcodes", mode:'copy'
+publishDir { file(params.outDir) / dir_name }, mode:'copy'
 tag "$libName"
 script:
+	libStruct = "$libStructDir/$libStructName"
+	if (params.scalePlex && libName in hashLibNames) {
+		libStruct = "$libStructDir/${params.scalePlexLibStructure}"
+		dir_name = "scaleplex/demux"
+	} else {
+		dir_name = "barcodes"
+	}
     """
-    mergeBCparserOutput.py --bc_jsons demux_metrics* --lib_json $libJson --libName $libName
+    mergeBCparserOutput.py --bc_jsons demux_metrics* --lib_json $libStruct --libName $libName
     """
 }
 
@@ -179,15 +216,24 @@ take:
 	samples
 	samplesCsv
 	libJson
-    	runFolder
-    	fastqDir
+	runFolder
+	fastqDir
 main:
 	runDir = runFolder
 	fqDir = fastqDir
 	fqs = null
+
+	// Get hash lib names
+	samples
+		.filter { it.rnaId != null }
+		.collect { it.libName }
+		.ifEmpty { [] }
+		.dump(tag:'hashLibNames')
+		.set { hashLibNames }
+	
 	if (runDir != null) {
 		if (params.fastqSamplesheet == null) {
-			makeBclConvertSamplesheet(samplesCsv, libJson.getParent(), libJson.getName(), 
+			makeBclConvertSamplesheet(samplesCsv, hashLibNames, libJson.getParent(), libJson.getName(), 
 					          file("$runDir/RunInfo.xml", checkIfExists:true))
 			fqSheet = makeBclConvertSamplesheet.out
 		} else {
@@ -196,7 +242,7 @@ main:
 		bclconvert(file(runDir), fqSheet)
 		fqs = bclconvert.out.fastq.flatten()
 	} else if (fqDir != null) {
-		fqs = Channel.fromPath("$fqDir/*fastq.gz", checkIfExists: true)
+		fqs = Channel.fromPath("$fqDir/**fastq.gz", checkIfExists: true)
 	} else {
 		ParamLogger.throwError("Must specify either '--runFolder' or '--fastqDir' when running alignment")
 	}
@@ -278,32 +324,38 @@ main:
 	}
 
 	// Process cell-barcodes and (optionally) split fastqs into samples based on tagmentation barcode
-	barcodeParser(samplesCsv, libJson.getParent(), libJson.getName(), fqGroups)
-	
+	barcodeParser(samplesCsv, hashLibNames, libJson.getParent(), libJson.getName(), fqGroups)
+
 	// Check that there exists fastq files(R1, R2) post bcParser, for every sample that corresponds to a libName in samples.csv
-	bcParserOutCheck = samples.map{ [it.libName, it.id] }.groupTuple().join(barcodeParser.out.readFq.groupTuple(), remainder: true)
-	// bcParserOutCheck -> (libName, [sample names corresponding to that libName], [[R1, R2 fastq files]])
-	bcParserOutCheck.dump(tag:'bcParserOutCheck')
-	bcParserOutCheck.map {
-		if (it[2] == null) {
-			ParamLogger.throwError("Library ${it[0]} does not have any passing R1 and R2 fastq files after bcParser")
-		}
-		// iterate over every sample name corresponding to a libName
-		for (sample in it[1]) {
-			// extract the sample name from the id
-			sampleName = sample.tokenize('.')[0]
-			exists = false
-			// iterate over every fastq file for that libName and check that the sample name is present in the fastq file name
-			for (file in it[2].flatten()) {
-				if (file.getName().toString().contains(sampleName)) {
-					exists = true
+	samples
+		// check post bcParser fastq generation only for RNA libraries
+		.filter { it.rnaId == null }
+		.map{ [it.libName, it.id] }
+		// get all samples corresponding to a libName
+		.groupTuple()
+		.join(barcodeParser.out.readFq.groupTuple(), remainder: true)
+		// bcParserOutCheck -> (libName, [sample names corresponding to that libName], [[R1, R2 fastq files]])
+		.dump(tag:'bcParserOutCheck')
+		.map {
+			if (it[2] == null) {
+				ParamLogger.throwError("Library ${it[0]} does not have any passing R1 and R2 fastq files after bcParser")
+			}
+			// iterate over every sample name corresponding to a libName
+			for (sample in it[1]) {
+				// extract the sample name from the id
+				sampleName = sample.tokenize('.')[0]
+				exists = false
+				// iterate over every fastq file for that libName and check that the sample name is present in the fastq file name
+				for (file in it[2].flatten()) {
+					if (file.getName().toString().contains(sampleName)) {
+						exists = true
+					}
+				}
+				if (!exists) {
+					log.warn("Sample ${sampleName} does not have passing R1 and R2 files from bcParser.")
 				}
 			}
-			if (!exists) {
-				log.warn("Sample ${sampleName} does not have passing R1 and R2 files from bcParser.")
-			}
 		}
-	}
 	
 	// Each barcodeParser run outputs fastqs for one libName
 	// There can be multiple barcodeParser jobs for one libName if splitFastq is true
@@ -319,19 +371,23 @@ main:
 		constructSampleName(it, params.splitFastq)
 	}
 	bcFqs.dump(tag:'bcFqs')
+
 	// Combine Read2 and barcode read for each sample / sample x RT combination
 	// demuxFqs -> (sample_id, read2, barcode read)
 	// matching key is dropped here
 	// if params.splitFastq true, then sample_name="{sample_name}.{rt_well_coordinate}"
-	demuxFqs = readFqs.join(bcFqs, by:[0,1,2]).map{ [it[0], it[1], it[2], it[3][1], it[4]] }
-	demuxFqs.dump(tag:'demuxFqs1')
-	// bcParser outputs (demuxFqs) are by libName and sampleName.
-	// We need to add the sample id (can occur multiple times for splitFastq subsamples)
-	demuxFqs = demuxFqs.combine(samples.map{ [it.libName, it.sample, it.id] }, by:[0,1])
-	demuxFqs.dump(tag:'demuxFqs2')
-	demuxFqs = demuxFqs.map{ [it[5], it[2], it[3], it[4]] }
-	//demuxFqs -> (sampleId, subsample, R2, BC)
-	demuxFqs.dump(tag:'demuxFqs3')
+	readFqs.
+		join(bcFqs, by:[0,1,2])
+		.map{ [it[0], it[1], it[2], it[3][1], it[4]] }
+		.dump(tag:'demuxFqs1')
+		// bcParser outputs (demuxFqs) are by libName and sampleName.
+		// We need to add the sample id (can occur multiple times for splitFastq subsamples)
+		.combine(samples.map{ [it.libName, it.sample, it.id] }, by:[0,1])
+		.dump(tag:'demuxFqs2')
+		.map{ [it[5], it[2], it[3], it[4]] }
+		//demuxFqs -> (sampleId, subsample, R2, BC)
+		.dump(tag:'demuxFqs3')
+		.set { demuxFqs }
 
 	if (params.trimFastq) {
 		demuxFqs = demuxFqs.toSortedList().flatMap()
@@ -360,16 +416,34 @@ main:
 
 	if (params.splitFastq) {
 		// Need to merge the bcParser outputs for a single library together
-        	organized_demux = barcodeParser.out.metrics.groupTuple()
-	        merge_demux(organized_demux, libJson)
+		organized_demux = barcodeParser.out.metrics.groupTuple()
+		merge_demux(organized_demux, hashLibNames, libJson.getParent(), libJson.getName())
 		metrics = merge_demux.out
     	}
 	else {
 		metrics =  barcodeParser.out.metrics
 	}
+	// create matching key for barcodesCsv output from bcParser
+	barcodeParser
+		// barcodesCsv -> [libName, [sample_1A_S1.barcodes.csv, sample_1B_S1.barcodes.csv, ...]]
+		.out.barcodesCsv
+		.transpose()
+		.map { constructSampleName(it, params.splitFastq) }
+		// collect barcodesCsv file for each lib [0], sample [1], and subsample [2] (or well)
+		// subsample will equal sample if splitFastq is false 
+		.groupTuple(by:[0, 1, 2])
+		.map { lib, sample, subsample, file ->
+			meta = [lib:lib, sample:sample, subsample:subsample]
+			[meta, file]
+		}
+		// barcodesCsv -> [[lib, sample, sample_1A], sample_1A_S1.barcodes.csv, sample_1A_S1.barcodes.csv, ...]]
+		.dump(tag:'barcodesCsv')
+		.set { barcodesCsv }
 
 emit:
 	fqs = demuxFqs
 	metrics = metrics
 	trimFqStats = trimFq.out.stats
+	barcodesCsv = barcodesCsv 
+	hashLibNames = hashLibNames
 }

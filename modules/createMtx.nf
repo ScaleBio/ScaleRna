@@ -86,7 +86,7 @@ script:
 // Assumes different cells in each subsample
 process mergeSamples {
 input:
-	tuple( val(samples), val(group), path(starDirs) )
+	tuple( val(samples), val(group), path("Solo.out*") )
 output:
 	tuple(val(group), path(outDir), emit: mergeOut)
 publishDir file(params.outDir) / "alignment", mode: 'copy'
@@ -97,7 +97,7 @@ script:
 	matrixFn = Utils.starMatrixFn(params.starMulti)
 	outDir = "${group}.merged/${group}.merged.star.solo/"
 """
-	mergeRawSTARoutput.py --star_dirs $starDirs --star_feature $params.starFeature --star_matrix $matrixFn --sample_ids $sampleIDs --out_dir $outDir
+	mergeRawSTARoutput.py --star_dirs Solo.out* --star_feature $params.starFeature --star_matrix $matrixFn --sample_ids $sampleIDs --out_dir $outDir
 """
 }
 
@@ -117,7 +117,8 @@ main:
 
 	if(params.mergedSamples) {
 		// soloResults is already merged by group. We just need to create a conbined samples.csv entry per group
-		samplesDict.map{ tuple(it.id, it.group) }
+		samplesDict
+		.map{ tuple(it.id, it.group) }
 		.join(soloResults)
 		.groupTuple(by:1) // All samples grouped for merging, with each column as a list of values
 		.filter{ it[0].size() > 1 } // Only merge samples with multiple libraries
@@ -139,11 +140,12 @@ main:
 	// libCount determines the number of libNames associated with each sampleName in the samplesheet.
 	// This allows us to determine whether or not multiple libraries are being merged.
 	// libCount -> (id, sample, libName)
-	libCount = samplesDict.map{tuple(it.id, it.sample, it.libName)}
-	// libCount -> (id, [sample], [libName])
-	libCount = libCount.groupTuple(by : 1)
-	// libCount -> (id, numberOfLibraries)
-	libCount = libCount.map{tuple(it[0], it[2].size())}.transpose()
+	samplesDict
+		.filter{ it.rnaId == null } // Only consider RNA samples
+		.map{ tuple(it.id, it.sample, it.libName) }
+		.groupTuple(by: 1) // Gather all libNames for each sample
+		.map{ tuple(it[0], it[2].size()) }.transpose()
+		.set { libCount }
 
 	// cellMetricsGenerationInput -> ([id, sample, group]_name, library_name, expectedCells, star_output, libCount)
 	cellMetricsGeneration(cellMetricsGenerationInput, libStructName, filterBarnyard, libStructDir)

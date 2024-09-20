@@ -42,11 +42,12 @@ class ParamLogger {
         def allowed_parameters = ['samples', 'genome', 'runFolder', 'fastqDir', 'fastqSamplesheet', 'reporting',
                                   'resultDir', 'outDir', 'bamOut', 'fastqOut', 'libStructure', 'merge', 'splitFastq',
                                   'bclConvertParams', 'fastqc', 'starFeature', 'starMulti', 'starStrand', 'trimFastq',
-                                  'trimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
+                                  'trimAdapt', 'scalePlexTrimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
                                   'taskMaxMemory', 'taskMaxCpus', 'taskMaxTime', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
                                   'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
                                   'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filterOutliers', 'madsReads',
-                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData']
+                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData', 'scalePlex',
+                                  'scalePlexLibStructure', 'scalePlexAssignmentMethod', 'scalePlexPercentFromTopTwo', 'scalePlexFCThreshold']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}
@@ -115,10 +116,16 @@ class ParamLogger {
         input_opts['samples'] = params.samples
         input_opts['genome'] = params.genome
         input_opts['libStructure'] = params.libStructure
+        if (params.scalePlex) {
+            input_opts['scalePlexLibStructure'] = params.scalePlexLibStructure
+        }
 
         workflow_opts['trimFastq'] = params.trimFastq
         workflow_opts['starFeature'] = params.starFeature
         workflow_opts['starMulti'] = params.starMulti
+        if (params.scalePlex) {
+            workflow_opts['scalePlex'] = params.scalePlex
+        }
         if (params.fixedCells != 0) {
             workflow_opts['fixedCells'] = params.fixedCells
         } else if (params.UTC != 0) {

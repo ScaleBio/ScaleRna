@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 from typing import Any, List, Dict
 import xml.etree.ElementTree as ET
+from scale_utils.validation import validateName
 
 # Fixed samplesheet.csv settings
 SETTINGS = {"CreateFastqForIndexReads": "1",
@@ -168,11 +169,7 @@ def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]]) -> Li
             # If neither is given, use the sample name (assuming one
             # sample per library)
             name = row["libName"]
-            for n in name:
-                if not (n.isalnum() or n in "-."):
-                    raise ValueError(f"sample name should only contain"
-                                     f" [a-z],[A-Z],[0-9], dash (-) or "
-                                     f"dot (.): {name}")
+            validateName(name, "Library name", other_chars="-")
             lib = Library(name=name)
 
             # Library (fastq) index sequences
@@ -187,6 +184,11 @@ def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]]) -> Li
                         raise ValueError(f"Unknown library index: {s}")
                     else:
                         lib.index1.append(s)
+            else:
+                # default in all library index1 sequences
+                for seqs in namedIndexSeqs.values():
+                    lib.index1.extend(seqs)
+
             if (seqs := row.get("libIndex2", "").strip()):
                 if seqs == "*":
                     lib.isUniqueDual = True
@@ -263,7 +265,17 @@ def print_settings(settings: Dict):
         print(f"{s},{v}")
 
 
-def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, settings):
+def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, settings: dict[str, str]):
+    """
+    Prepare the bcl_convert samplesheet.csv and print to stdout
+    
+    Args:
+        samplesCsv: Path to input samples.csv file
+        libJson: Path to library structure definition
+        runInfo: Path to RunInfo.xml
+        splitFastq: Split sample by PCR index barcode sequence
+        settings: Fixed settings for samplesheet.csv
+    """
     libDef = load_libDef(libJson)
 
     if splitFastq and not libDef["split_on"]:
@@ -352,15 +364,16 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
     # Write one line per index sequence combination
     # repeat sampleName if multiple indicies / combinations
     for lib in libs:
+        i1s = lib.index1
         i2s = lib.index2
         if indexInfo.revCompIndex2:
             i2s = [revComp(i) for i in lib.index2]
         if indexInfo.index2Used and lib.isUniqueDual:
             # Only matched i1,i2 pairs
-            for i1,i2 in zip(lib.index1, i2s):
+            for i1,i2 in zip(i1s, i2s):
                 print(lib.name, i1, i2, sep=',')
         elif indexInfo.index1Used:
-            for i1 in lib.index1:
+            for i1 in i1s:
                 if indexInfo.index2Used:
                     # All i1 * i2 combinations
                     for i2 in i2s:

@@ -7,13 +7,13 @@ input:
 output: 
 	tuple(val(sample), path("Aligned.sortedByCoord.out.bam"), emit: bam, optional: true)
 	tuple(val(sample), path("Log.*"), emit: log)
-	tuple(val(sample), path("${sample}"), emit: solo)
+	tuple(val(sample), path("Solo.out"), emit: solo)
 
 // If params.splitFastq is true we publish individual split outputs into params.outDir/alignment/<sample>/split/
 // with output filenames <sample>.<count>.*
 // Otherwise just params.outDir/alignment/<sample>/<sample>.*
 // BAM file is only published with --bamOut
-publishDir { outDir }, pattern: "${sample}", mode: 'copy', saveAs: { "${outName}.star.solo" }
+publishDir { outDir }, pattern: "Solo.out", mode: 'copy', saveAs: { "${outName}.star.solo" }
 publishDir { outDir / "${outName}.star.align" }, pattern: "*bam", mode: 'copy', saveAs: { "${outName}.bam" }, enabled: params.bamOut
 publishDir { outDir / "${outName}.star.align" }, pattern: "Log*", mode: 'copy'
 tag "$sample $count"
@@ -27,7 +27,7 @@ script:
 	
 	barcodeParam = library["star_barcode_param"]
 	if (params.bamOut) {
-		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM --outSAMunmapped Within"
+		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM gx gn --outSAMunmapped Within"
     } else {
         bamOpts = "--outSAMtype None" 
     }
@@ -37,7 +37,6 @@ script:
     $bamOpts --outSJtype None --soloCellReadStats Standard \
 	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers ${params.starMulti} \
 	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat
-	mv Solo.out/ $sample
 """
 }
 
@@ -124,6 +123,7 @@ main:
 	} else {
 		solo_out = starsolo.out.solo
 	}
+	solo_out.dump(tag:'soloOut')
 
 emit:
     soloOut = solo_out

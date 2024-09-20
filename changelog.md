@@ -1,3 +1,6 @@
+# Version 1.6
+* Add support for ScalePlex library analysis and assignment in tandem with RNA analysis, enabled by the `--scaleplex` parameter 
+
 # Version 1.5
 * New optional _EmptyDrops_-like cell calling method (`--cellFinder`)
 * Correct up to one `N` basecall per barcode, like other sequencing errors 
