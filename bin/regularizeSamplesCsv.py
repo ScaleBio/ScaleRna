@@ -88,7 +88,7 @@ def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, librar
             print(f"The barcodes range mentioned for each sample overlap amongst individual samples", file=sys.stderr)
             sys.exit(1)
 
-def main(samplesCsv:Path, splitFastq:bool, reporting:bool, libraryStruct:Path, resultDir:Optional[str]):
+def main(samplesCsv:Path, splitFastq:bool, reporting:bool, libraryStruct:Path, singleLibrary:Optional[str], resultDir:Optional[str]):
     """
     Writes normalized samples.csv to stdout
     Args:
@@ -173,6 +173,9 @@ def main(samplesCsv:Path, splitFastq:bool, reporting:bool, libraryStruct:Path, r
             for r in rows:
                 r.insert(2, "ScaleRNA")
         libNameIndex = cols.index("libName")
+        if singleLibrary: #Overwrite libName with single fixed value
+            for r in rows:
+                r[libNameIndex] = singleLibrary
         for r in rows:
             all_samples_barcode_range[r[libNameIndex]] = []
         if "barcodes" not in cols:
@@ -217,5 +220,6 @@ if __name__ == '__main__':
     parser.add_argument('--reporting', help='set for use in merging/reporting only workflow', action="store_true", default=False)
     parser.add_argument('--resultDir', help="Previous pipeline output directory (used as default for 'resultDir column)")
     parser.add_argument('--libraryStruct', help="Library structure json file", type=Path)
+    parser.add_argument('--singleLibrary', help="Set libName for all samples to this fixed value")
     args = parser.parse_args()
-    main(args.samples, args.splitSample, args.reporting, args.libraryStruct, args.resultDir)
+    main(args.samples, args.splitSample, args.reporting, args.libraryStruct, args.singleLibrary, args.resultDir)

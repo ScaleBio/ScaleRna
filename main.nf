@@ -76,6 +76,9 @@ script:
 	if (params.splitFastq) {
 		opts += "--splitSample "
 	}
+	if (params.singleLibrary) {
+		opts += "--singleLibrary ScaleRNA "
+	}
 	if (params.reporting) {
 		opts += "--reporting "
 	}
