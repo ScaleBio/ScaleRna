@@ -47,7 +47,8 @@ class ParamLogger {
                                   'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
                                   'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filterOutliers', 'madsReads',
                                   'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData', 'scalePlex',
-                                  'scalePlexLibStructure', 'scalePlexAssignmentMethod', 'scalePlexPercentFromTopTwo', 'scalePlexFCThreshold']
+                                  'scalePlexLibStructure', 'scalePlexAssignmentMethod', 'scalePlexPercentFromTopTwo', 'scalePlexFCThreshold',
+				  'scale-plex-FCThreshold']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}

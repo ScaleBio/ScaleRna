@@ -1,4 +1,7 @@
 # Version 1.6
+## 1.6.1
+* Fix unnecessary parameter warning
+## 1.6.0
 * Add support for ScalePlex library analysis and assignment in tandem with RNA analysis, enabled by the `--scaleplex` parameter 
 
 # Version 1.5
