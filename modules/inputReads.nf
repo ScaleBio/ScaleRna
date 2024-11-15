@@ -402,7 +402,6 @@ main:
 	if (params.fastqc) {
 		// Exclude I1 and I2 from fastqc
 		mainReads = fqSamples.flatMap{it.get(1)}.filter{getReadFromFqname(it.getName())[0] == 'R'}
-		channel.dump(tag:'fastqc')
 		fastqc(mainReads)
 		reports = fastqc.out.zip
 		if (runDir != null) {

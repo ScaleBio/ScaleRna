@@ -1,4 +1,6 @@
 # Version 1.6
+## 1.6.2
+* Fix erroneous channel dump in inputReads.nf that was triggered by Nextflow 24.10
 ## 1.6.1
 * Fix unnecessary parameter warning
 ## 1.6.0
