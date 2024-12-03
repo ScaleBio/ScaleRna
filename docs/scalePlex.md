@@ -4,16 +4,16 @@ When using the ScalePlex Oligo Fixation Plate a separate enriched library is gen
 
 ## --scalePlex true
 
-When this parameter is set to true, the workflow looks for the ScalePlex reads as specifiedin the Sample Barcode Table (samples.csv) portion either from BCL or FASTQ input. Example file here: [scaleplex.samples.csv](/docs/examples/scaleplex/scaleplex.samples.csv)
+When this parameter is set to true, the workflow looks for the ScalePlex reads as specified in the Sample Barcode Table (samples.csv) portion either from BCL or FASTQ input. Example file here: [scaleplex.samples.csv](/docs/examples/scaleplex/scaleplex.samples.csv)
 
-- Note for Input Modes: When starting with fastq files or if the ScaleRNA and ScalePlex libraries were sequenced separately, fastq files will need to be generated for ScaleRNA and ScalePlex into separate files, then placed in one parent directory supplied in the `fastqDir` parameter (files can exist in subdirectories of this supplied path)
+- Note for Input Modes: When starting with fastq files or if the ScaleRNA and ScalePlex libraries were sequenced separately, fastq files will need to be generated for ScaleRNA and ScalePlex into separate files, then placed in one parent directory supplied in the `fastqDir` parameter (files can exist in subdirectories of this supplied path). See [Fastq Generation](fastqGeneration.md) and the example samplesheet.csv including ScalePlex libraries [ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv](/docs/examples/fastq-generation/ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv)
 
 ## Sample Barcode Table (samples.csv)
 
 There are additional **optional** columns for the Sample Barcode Table when running the ScalePlex pipeline.
 | Column              | Description         | Example |
 |---------------------|---------------------|---------|
-| scalePlexLibName    | Name for the enriched ScalePlex library / fastq files, same structure as RNA library, described here:  [Fastq Generation](/fastqGeneration.md). Defaults to RNA library name with `-ScalePlex` appended   | ScalePlex       |
+| scalePlexLibName    | Name for the enriched ScalePlex library / fastq files, same structure as RNA library ([Fastq Generation](fastqGeneration.md)). Defaults to RNA library name with `-ScalePlex` appended   | ScalePlex       |
 | scalePlexLibIndex   | i7 sequences to associate with enriched library. Full sequence list here: [ScalePlex i7](../references/scaleplex_p7.txt)   | ScalePlex-A-AP1        |
 | scalePlexBarcodes   | Valid fixation plate wells for this sample, follows same specification scheme as the [RNA RT barcodes](/samplesCsv.md), but is in reference to the ScalePlex fixation plate   | 1A-6H        |
 

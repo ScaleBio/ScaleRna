@@ -7,8 +7,11 @@ Alternatively it is also possible to generate fastq files upstream using standar
 ### RNA kit v1.0
 An example [samplesheet.csv](examples/fastq-generation/samplesheet_v1.0.csv) with typical options is included. Here all 96 i7 barcode sequences from the PCR plate are merged into one set of fastq files. If an index2 (i5) read is used to demultiplex the ScaleBio RNA library with other libraries in the sequencing run, a `index2` column can be added with the constant i5 sequence of the ScaleRna library, which is `TGAACCTT[AC]` (8 or 10bp) in forward and `AAGGTTCA[GT]` in reverse orientation. See [samplesheet_v1.0_with_i5.csv](examples/fastq-generation/samplesheet_v1.0_with_i5.csv).
 
-### RNA Kit v1.1 and Extended Throughput Kit
-The v1.1 kit uses a different index read setup, one i5 index for each final distribution (PCR) plate well and i7-pools for each distinct plate. An example [samplesheet_v1.1.csv](examples/fastq-generation/samplesheet_v1.1.csv) is included. Some sequencers require the `index2` (i.e. `i5`) sequence in the opposite orientation; an example for that is included here: [samplesheet_v1.1_revComp.csv](examples/fastq-generation/samplesheet_v1.1_revComp.csv).
+### RNA Kit v1.1
+The v1.1 kit uses a different index read setup, one i5 sequence (`index2` read) for each final distribution (PCR) plate well and a pool of 4 i7 sequences (`index1` read) for the whole plate. An example Illumina[samplesheet.csv](examples/fastq-generation/ScaleRNA_3L_samplesheet_v1.1.csv) with all sequences is included. Some sequencers require the `index2` (i.e. `i5`) sequence in the opposite orientation; an example for that is included here: [ScaleRNA_3L_samplesheet_v1.1_revComp.csv](examples/fastq-generation/ScaleRNA_3L_samplesheet_v1.1_revComp.csv).
+
+### Extended Throughput Kit
+Each extended throughput plate uses the same set of i5 (`index2`) sequences, but a different pool of i7 (`index1`). A full samplesheet for all four plates can be found here: [ScaleRNA_3L_and_ET_samplesheet_v1.1.csv](examples/fastq-generation/ScaleRNA_3L_and_ET_samplesheet_v1.1.csv) (and with reverse index2: [ScaleRNA_3L_and_ET_samplesheet_v1.1_revComp.csv](examples/fastq-generation/ScaleRNA_3L_and_ET_samplesheet_v1.1_revComp.csv)).
 
 ### Splitting Large Fastq Files
 This creates a separate set of fastq files for each extended throughput plate (`RNA-A-AP1`, `RNA-A-AP2`, ...). See [Extended Throughput](extendedThroughput.md) for how to analyze these jointly.
