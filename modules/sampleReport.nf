@@ -57,6 +57,7 @@ script:
 	libStruct = "${libStructDir}/${libStructName}"
 	// trimStats is optional. If empty (no files), skip the --tripStats option
 """
+	export DATAPANE_CDN_BASE="https://d3j2ibc7el7s1k.cloudfront.net/v0.17.0"
 	export TMPDIR=\$(mktemp -p `pwd` -d)
 	if test -n "\$(shopt -s nullglob; echo trim_stats*)"
 	then

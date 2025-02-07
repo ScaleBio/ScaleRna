@@ -1,4 +1,6 @@
 # Version 1.6
+## 1.6.3
+* Fix remote URL in sample and library QC reports (HTML)
 ## 1.6.2
 * Fix erroneous channel dump in inputReads.nf that was triggered by Nextflow 24.10
 ## 1.6.1

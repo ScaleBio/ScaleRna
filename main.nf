@@ -135,6 +135,7 @@ script:
 		libJson = "${libStructDir}/${libJsonFn}"
 	}
 """
+	export DATAPANE_CDN_BASE="https://d3j2ibc7el7s1k.cloudfront.net/v0.17.0"
 	export TMPDIR=\$(mktemp -p `pwd` -d)
 	generateFastqReport.py --libName $libName --outDir $outDir --demuxMetrics $demuxJson --libStruct $libJson --libMetrics metrics $opts
 """
