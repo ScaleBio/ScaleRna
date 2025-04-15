@@ -16,9 +16,8 @@ where `samples.csv` and `genome` should be the same files as used in the previou
 
 
 ## Inputs
-The `reporting` workflow will read the (raw) _STARsolo_ output from the previous workflow run specified in `resultDir`; specifically, `resultDir/alignment/<sample>.<libName>.star.solo`.
-It also reads reference information from the `genome.json` and the library structure json
-
+The `reporting` workflow will read the (raw) *STARSolo* output and a *STARSolo* log file from the previous pipeline run specified in `resultDir`. Specifically, the raw output is read from `resultDir/alignment/<sample>.<libName>.star.solo` and the log file is read from `resultDir/alignment/<sample>.<libName>.star.align`
+It  also reads reference information from the `genome.json` and `library.json`
 
 ## Outputs
 The `reporting` workflow produces

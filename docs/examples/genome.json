@@ -1,7 +1,7 @@
 {
 	"name": "GRCh38",
-	"star_index" : "s3://scale.pub/testData/rna/GRCh38_chr1_genome/star.filteredGtf.chr1/",
-	"gtf": "s3://scale.pub/testData/rna/GRCh38_chr1_genome/chr1.gtf",
+	"star_index" : "s3://scale.pub/testData/rna/GRCh38_chr20_genome/star.filteredGtf.chr20/",
+	"gtf": "s3://scale.pub/testData/rna/GRCh38_chr20_genome/chr20.gtf",
 	"isBarnyard": false,
 	"speciesName": "Homo sapiens"
 }

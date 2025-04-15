@@ -3,6 +3,8 @@ reports:
         display: "Library QC report"
     "reports/**.report.html":
         display: "Sample QC report"
+    "reports/library/csv/allLibraries.barcodeStats.csv":
+        display: "All libraries barcode stats"
     "reports/multiqc_report.html":
         display: "FASTQ MultiQC"
     "reports/allSamples.reportStatistics.csv":

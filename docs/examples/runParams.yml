@@ -5,14 +5,23 @@
 ### Sequencing data input can be either a Illumina sequencer RunFolder (bcl)
 # runFolder : 
 ### or a directory with fastq files
-fastqDir : "s3://scale.pub/testData/rna/202312_rnaV1.1/fastqs/"
+fastqDir : "s3://scale.pub/testData/rna/202504_quantumV1/fastq/"
 
-### A file listing all samples in the analysis with their RT barcodes and optional library information
+### A file listing all samples in the analysis with their RT barcodes
 samples : ${projectDir}/docs/examples/samples.csv
 
 #### Reference information
-### Version of the Scale Single Cell RNA assay used: "libV1.json" or "libV1.1.json"
-libStructure : libV1.1.json
+### Version of the Scale Single Cell RNA assay used: "libV1.json", "libV1.1.json", or "libQuantumV1.0.json"
+libStructure : libQuantumV1.0.json
 
-### Path to a .json file defining the reference genome
+### Path to a .json file defining the reference genome, for the test dataset this is only chromosome 20.
 genome : ${projectDir}/docs/examples/genome.json
+
+### Indicates the QuantumScale kit was used
+quantum: true
+  
+### Analyzing the test dataset is a helpful check to see if everything is setup correctly,
+### however it is not a realistically sized dataset (either in number of cells or reads),
+### so the resource limits are set to a minimum.
+taskMaxMemory: 7.GB
+taskMaxCpus: 2

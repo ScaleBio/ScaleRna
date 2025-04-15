@@ -1,7 +1,7 @@
 # ScaleBio RNA QC reports
 
 ## Library report
-The file called _library_<LibraryName>_.report.html_ contains the summary report at the library level, i.e. sequencing, barcode and demultiplexing information for all samples processed in one run of the ScaleRNA kit.
+The file called _library\_{LibraryName}.report.html_ contains the summary report at the library level, i.e. sequencing, barcode and demultiplexing information for all samples processed in one run of the ScaleRNA kit.
 
 ### Barcode Read Status
 This table gives the barcode matching statistics for the full library. Reads that fail barcode matching are not assigned to any sample and are hence not included in any downstream analysis or metrics.
@@ -18,10 +18,9 @@ Plate-maps showing the total unique transcript counts (complexity) for each well
 
 
 ## Sample Report
-The files called _<SampleName>.report.html_ contain the summary report for a single sample, i.e. all or a subset of RT wells from a ScaleRNA library. It shows read, cell and barcode level summary metrics and plots for library and sample QC.
+The files called _{SampleName}.{LibraryName}.report.html_ contain the summary report for a single sample, i.e. all or a subset of RT wells from a ScaleRNA library. It shows read, cell and barcode level summary metrics and plots for library and sample QC.
 
 ### Mapping Metrics
-**Total Reads**: The number of RNA reads assigned to this sample. This is after matching the barcodes (see above) and possibly demultiplexing samples based on the RT barcode in the samplesheet. \
 **Passing Reads**: Reads passing pre-alignment filters, specifically at least 16bp after Poly-A trimming. \
 **Reads Mapped to Genome**: The fraction of _Passing Reads_ that are aligned anywhere to the genome \
 **Reads Mapped to Transcriptome**: The fraction of _Reads Mapped to Genome_ that match one or more annotated genes (exon or intron, in sense direction) \
@@ -56,7 +55,7 @@ This shows the number of unique genes detected for each cell-barcode relative to
 This shows the total number of reads vs. the sequencing saturation for each cell-barcode.
 
 ### Barcodes Tab
-The plots on the left show the number of cells with each RT barcode. \
+The plots on the left show the number of cells with each sample barcode. \
 The plots of the right show the complexity (median unique transcript counts per cell) for each of these.
 
-A breakdown of ligation and PCR barcodes is in the library report.
+A breakdown of other barcodes is in the library report.

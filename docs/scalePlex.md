@@ -31,17 +31,16 @@ There are additional **optional** columns for the Sample Barcode Table when runn
 |-----------|------|-------------|
 | `scaleplex`| `demux/` | directory containing read level barcode level validation information|
 | | `<sample>.<libName>.ScalePlex.raw.matrix/`| per-cell barcode, per-ScalePlex oligo umi counts matrix for all potential cell barcodes detected in the ScalePlex library|
-| | `<sample>.<libName>.ScalePlex.filtered.matrix/`| per-cell barcode, per-scalePlex oligo umi counts matrix for only cell barocdes detected in the ScalePlex library that were called as a cell in the RNA fraction of the analysis|
-| | `<sample>.<libName>.ScalePlex.cellMetrics.csv`| using the same cell barcodes as in the raw.matrix/ folder, per-cell barcode ScalePlex library meta data information. Notably, this does not include assignment as this is largely used in our `--reporting` only pipeline run|
+| | `<sample>.<libName>.ScalePlex.filtered.matrix/`| per-cell barcode, per-scalePlex oligo umi counts matrix for only cell barcodes detected in the ScalePlex library that were called as a cell in the RNA fraction of the analysis|
+| | `<sample>.<libName>.ScalePlex.cellMetrics.parquet`| using the same cell barcodes as in the raw.matrix/ folder, per-cell barcode ScalePlex library meta data information. Notably, this does not include assignment as this is largely used in our `--reporting` only pipeline run|
 
-### Samples directory additions with the inclusion of ScalePlex
-- In the `samples` directory there is a `<sample>.<libName>.ScalePlex.allCells.csv` with per-cell ScalePlex-related metrics. The most important column is `assigned_scaleplex` that corresponds to the fixation well that the cell was fixed in prior to pooling. ScalePlex assignment is only performed for passing cells from the RNA workflow, and all per-cell metrics reported at a sample level are relative to those passing cells from the RNA workflow as the reference point. A full descriptor of the contents of the columns in this file can be found below:
+Columns in the `<sample>.<libName>.ScalePlex.cellMetrics.parquet` file:
 
 | Measure | ​Description​ |
 |---------|-------------|
 | reads | The number of reads associated with that cell in the ScalePlex library |
 | noScalePlex | The ratio of reads of the barcode in question that did not have a ScalePlex oligo sequence detected |
-| umis | The number of ScalePlex oligo UMIs detected |
+| counts | The number of ScalePlex oligos detected |
 | scaleplex | The number of uniquely detected scalePlex oligos, defined as at least one read​ |
 | max | The number of UMIs associated with the top / most highly detected ScalePlex oligo in that cell |
 | second | The number of UMIs associated with the second highest detected ScalePlex oligo in that cell |
@@ -52,10 +51,11 @@ There are additional **optional** columns for the Sample Barcode Table when runn
 | minorFrac​ | Ratio of second to max​ |
 | Saturation​ | Ratio of UMI detected over Usable Reads |
 | topTwo_scaleplex | Which two scalePlex oligos were the two highest detected |
-| ALIAS_alias | columns that denote the alias of the well coordinate for the levels of cell barcoding | 
-| pass | True if the barcode was one that was called as a cell in the RNA fraction of the analysis. Only those in which pass = True will have a potential assignment |
-| assigned_scaleplex | Final assignment of cell barocde, with successful assignment corresponding to the fixation plate well of sample origin |
-| sample | Value for which sample as denoted by the samples.csv that the barcode originated from |
+| ALIAS | columns that denote the alias of the well coordinate for the levels of cell barcoding | 
+| Cell_Barcode | column with the unique combination of barcodes | 
+
+### Change to allCells.csv with the inclusion of ScalePlex
+- In the **samples** directory `allCells.csv` file referenced in [outputs](outputs.md) there is a new column called `assigned_scaleplex` that corresponds to the fixation well that the cell was fixed in prior to pooling. ScalePlex assignment is only performed for passing cells from the RNA workflow, and all per-cell metrics reported at a sample level are relative to those passing cells from the RNA workflow as the reference point.
 
 ### reports
 - With the usage of ScalePlex in a workflow run, there are several amendments to the reporting structure that are worth noting. First and foremost is the generation of a library report for each ScalePlex library in the workflow. With ScalePlex, libraries are at the level of final distribution plates and extended throughput plates, such that for each final distribution plate used for your analysis will have both an RNA library report as well as a Scaleplex library report. These capture the read attribution per sample within the library, barcode validation pass rates, and Scaleplex oligo detection pass rates per read of the library.

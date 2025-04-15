@@ -21,6 +21,7 @@ This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequenci
 ## Required Inputs
 * Sequencing reads
     * Path to the Illumina sequencer RunFolder (`.bcl` files)
+    * Alternatively, the path containing unaligned cram files from Ultima Genomics sequencing
     * To instead start the workflow from `.fastq` files, generated outside (before) this workflow, see [Fastq generation](docs/fastqGeneration.md).
 * Sample table
     * A `.csv` file listing all samples for this analysis run, optionally split by RT barcode. See [samples.csv](docs/samplesCsv.md).
@@ -28,8 +29,8 @@ This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequenci
     * The workflow requires a reference genome, including a [STAR](https://github.com/alexdobin/STAR) index for alignment, and gene annotation. See [Reference Genomes](docs/genomes.md)
 * Kit version / Library structure
     * Select the `libStructure` corresponding to the version of the ScaleBio RNA kit used. See [Analysis Parameters](docs/analysisParameters.md#kit-version)
-    * Version 1.0 requires `Read1`, `Read2` and `Index1 or i7`
-    * Version 1.1 requires `Read1`, `Read2`, `Index1 or i7` and `Index2 or i5`
+    * QuantumScale 1.0 and ScaleRna 1.1 requires `Read1`, `Read2`, `Index1 or i7` and `Index2 or i5`
+    * ScaleRna 1.0 requires `Read1`, `Read2` and `Index1 or i7`
 
 ## Outputs
 The workflow produces per-sample and per-library ScaleBio demultiplexed reads (`fastqs`), alignments (`bam`), QC reports (`html`), a cell-by-gene count-matrix (`mtx`) and more; See [Outputs](docs/outputs.md) for a full list.
@@ -50,15 +51,15 @@ A small test run, with all input data stored online, can be run with the followi
 
 With this command, nextflow will automatically download the input data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/202312_rnaV1.1/fastqs/ fastqs --no-sign-request
-aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr1_genome GRCh38_chr1_genome --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/202504_quantumV1/fastq fastq --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr20_genome GRCh38_chr20_genome --no-sign-request
 ```
 and then run with
 ```
 nextflow run /PATH/TO/ScaleRna/ -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
 ```
 
-Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a complete dataset.
+Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a complete or realistic dataset.
 
 ### Nextflow Command-line
 `nextflow` options are given with a single `-` (e.g. `-profile`), while workflow parameters (e.g. `--outDir`) are given with a double dash `--`. See the [Nextflow command-line documentation](https://www.nextflow.io/docs/latest/cli.html) for further details.

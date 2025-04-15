@@ -1,33 +1,37 @@
 nextflow.enable.dsl=2
 
-import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
-
-include { inputReads } from './modules/inputReads.nf'
+// Validate and print key pipeline parameters
+ParamLogger.initialise(workflow, params, log)
+include { INPUT_READS } from './modules/input_reads.nf'
 include { SCALE_PLEX } from './modules/scale_plex.nf'
 include { SCALE_PLEX as SCALE_PLEX_REPORTING} from './modules/scale_plex.nf'
-include { alignment } from './modules/alignment.nf'
-include { multiSampleReport} from './modules/sampleReport.nf'
-include { sampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:false)
-include { sampleReport as mergeSampleReport } from './modules/sampleReport.nf' addParams(mergedSamples:true)
-include { filterMtx } from './modules/createMtx.nf' addParams(mergedSamples:false)
-include { filterMtx as mergedFilterMtx } from './modules/createMtx.nf' addParams(mergedSamples:true)
-include { downstream } from './modules/downstream.nf' addParams(comparison:false)
-include { downstream as mergedDownstream } from './modules/downstream.nf' addParams(comparison:false)
-include { downstream as compareDownstream } from './modules/downstream.nf' addParams(comparison:true)
+include { ALIGNMENT } from './modules/alignment.nf'
+include { MultiSampleReport } from './modules/sample_report.nf'
+include { MultiLibraryReport } from './modules/internal.nf'
+include { ULTIMA } from './modules/ultima.nf'
+include { SAMPLE_REPORT } from './modules/sample_report.nf'
+include { SAMPLE_REPORT as MERGE_SAMPLE_REPORT } from './modules/sample_report.nf'
+include { FILTER_MTX } from './modules/create_mtx.nf'
+include { FILTER_MTX as MERGED_FILTER_MTX } from './modules/create_mtx.nf'
+include { DOWNSTREAM } from './modules/downstream.nf'
+include { DOWNSTREAM as MERGED_DOWNSTREAM } from './modules/downstream.nf'
+include { DOWNSTREAM as COMPARE_DOWNSTREAM } from './modules/downstream.nf'
 
-// Load .json file into object
-// (reference genomes, library design, etc.)
-def loadJson(json) {
-	def jsonSlurper  = new JsonSlurper()
-	return jsonSlurper.parse( json )
+def shouldRunLibDetection(samples) {
+	def header = samples.withReader { reader ->
+		reader.readLine()
+	}
+	if (!header.contains("libName") && params.quantum && params.fastqDir) {
+		return true
+	}
+	return false
 }
 
 // Create a 'file()' from string 'path'
 // 'path' could be null, a URL, an absolute file-path or relative to 'baseDir'
 def expandPath(path, baseDir) {
 	if (path == null) { return null}
-	uri = new URI(path)
+	def uri = new URI(path)
 	if (uri.isAbsolute()) {
 		return file(path)
 	} else {
@@ -42,7 +46,7 @@ def loadGenome(json) {
 		ParamLogger.throwError("--genome should be json file, not a directory: ${json}")
 	}
 	def baseDir = json.getParent()
-	genome = loadJson(json)
+	def genome = Utils.loadJson(json)
 	genome.star_index = expandPath(genome.star_index, baseDir)
 	if (genome.star_index == null || !genome.star_index.exists()) {
 		ParamLogger.throwError("Genome star_index not found: ${genome.star_index?.toUriString() ?: ''}")
@@ -51,32 +55,51 @@ def loadGenome(json) {
 	return genome
 }
 
-// Load per-sample read-counts from bcParser output
-def loadDemuxReadCounts(demuxMetrics) {
-	def jsonSlurper  = new JsonSlurper()
-	def counts = []
-		json = jsonSlurper.parse(demuxMetrics)
-		for (sample in json["samples"]) {
-			counts.add(tuple(sample.value["name"], sample.value["reads"][0]))
+def resolveScalePlexToRnaMapping(scalePlexLibJson) {
+	if (params.scalePlexToRnaMapping) {
+		scalePlexToRnaMapping = file(params.scalePlexToRnaMapping, checkIfExists:true)
+	} else {
+		scalePlexLibStructure = Utils.loadJson(scalePlexLibJson)
+		if (scalePlexLibStructure.get("scaleplex_to_rna_mapping")) {
+			scalePlexToRnaMapping = file(scalePlexLibJson.getParent()) / scalePlexLibStructure["scaleplex_to_rna_mapping"]
+		} else {
+			// path input cannot be null, no mapping file used in 3lvl pipeline
+			scalePlexToRnaMapping = []
 		}
-	return counts
+	}
+	return scalePlexToRnaMapping
 }
 
 // Prepare samples.csv with defaults, rename legacy columns, etc.
-process regularizeSamplesCsv {
-input: 
+process RegularizeSamplesCsv {
+	label 'small'
+	cache 'deep'
+
+	// Publish user provided samples csv to output directory
+	publishDir params.outputDir, pattern: "samples.in.csv", mode: 'copy', saveAs: {'samples.csv'}
+
+	input: 
 	path("samples.in.csv")
-	val(libStructName)
-	path(libStructDir)
-output: 
-	path("samples.csv")
-publishDir params.outDir, mode: 'copy'
-label 'small'
-cache 'deep'
-script:
+	// Directory containing the library structure definition (barcode sequence lists are loaded from here)
+	path("references")
+	// Filename of the library structure definition .json
+	val(libStructName) 
+	// File containing the mapping of scale plex to RNA PCR barcodes
+    path(mapping_file) 
+	
+	output: 
+	path("samples.csv"), emit: samples_csv
+	path("barcode_range_unwrapped_samples.csv"), emit: barcode_unwrapped_samples_csv, optional: true
+	path("samples.in.csv")
+
+	script:
+	libStruct = "references/$libStructName"
 	opts=""
 	if (params.scalePlex) {
 		opts += "--scalePlex "
+		if (mapping_file) {
+			opts += "--scalePlexToRnaMapping $mapping_file "
+		}
 	}
 	if (params.splitFastq) {
 		opts += "--splitSample "
@@ -87,57 +110,80 @@ script:
 	if (params.resultDir) {
 		opts += "--resultDir ${params.resultDir} "
 	}
-	libStruct = "${libStructDir}/${libStructName}"
-"""
-	regularizeSamplesCsv.py samples.in.csv --libraryStruct $libStruct $opts > samples.csv
-"""
+	if (params.quantum) {
+		opts += "--quantum "
+	}
+	if (params.ultimaCramDir) {
+		opts += "--ultima "
+	}
+	if (params.fastqDir || params.ultimaCramDir) {
+		opts += "--fastq "
+	}
+	"""
+	regularize_samples_csv.py samples.in.csv --libraryStruct $libStruct $opts
+	"""
 }
 
 // Generate metrics for each library from the metrics of all samples in the library
-process fastqMetricsGeneration {
-input:
-	tuple(val(libName), val(samples), path("allCells*.csv"))
-output:
+process LibraryMetricsGeneration {
+	tag "$libName"
+	label 'large'
+	
+	input:
+	tuple(val(libName), val(samples), path("allCells*.parquet"))
+	
+	output:
 	tuple(val(libName), path("library_${libName}_metrics"))
-label 'report'
-tag "$libName"
-script:
-"""
-	getFastqMetricsFromSampleMetrics.py --sample_metrics allCells* --libName ${libName}
-"""
+
+	script:
+	"""
+	get_library_metrics_from_sample_metrics.py --sample_metrics allCells* --libName ${libName}
+	"""
 }
 
-// Generate report for each library from metrics generated in fastqMetricsGeneration
-process fastqReportGeneration {
-input:
+// Generate report for each library from metrics generated in LibraryMetricsGeneration
+process LibraryReportGeneration {
+	tag "$libName"
+	label 'report'
+	label 'optional'
+
+	publishDir params.outputDir, mode: 'copy'
+
+	input:
 	tuple(val(libName), path(demuxJson), path("metrics"))
 	val(libJsonFn)
 	path(libStructDir)
+	val(scalePlexLibJsonFn)
+	path("scalePlexLibStructDir") // Cannot use a variable here since it will cause input name collision if libStructDir and scalePlexLibStructDir are the same
 	val(hashLibNames)
-output:
+	
+	output:
 	path("${outDir}/library_${libName}.report.html")
-	path("${outDir}/csv/library_${libName}*.csv")
-publishDir params.outDir, mode: 'copy'
-label 'report'
-label 'optional'
-tag "$libName"
-script:
+	path("${outDir}/csv/library_${libName}.overallMatches.csv"), emit: overallMatches, optional: true
+	path("${outDir}/csv/library_${libName}.typeLevelMatches.csv"), emit: typeLevelMatches, optional: true
+	path("${outDir}/csv/library_${libName}_unique_reads*.csv")
+
+	script:
 	outDir = "reports/library"
+	opts= "--minPassingSampleReads ${params.minPassingSampleReads} "
 	if (params.internalReport) {
-		opts = "--internalReport"
-	} else {
-		opts = ""
+		opts = opts + "--internalReport "
 	}
+	if (params.ultimaCramDir) {
+		opts = opts + "--ultima "
+	} else {
+		opts = opts + "--demuxMetrics $demuxJson "
+	} 
 	if (params.scalePlex && libName in hashLibNames) {
-		libJson = "$libStructDir/${params.scalePlexLibStructure}"
+		libJson = "scalePlexLibStructDir/${scalePlexLibJsonFn}"
 		opts += " --scalePlexLib"
 	} else {
 		libJson = "${libStructDir}/${libJsonFn}"
 	}
-"""
+	"""
 	export DATAPANE_CDN_BASE="https://d3j2ibc7el7s1k.cloudfront.net/v0.17.0"
 	export TMPDIR=\$(mktemp -p `pwd` -d)
-	generateFastqReport.py --libName $libName --outDir $outDir --demuxMetrics $demuxJson --libStruct $libJson --libMetrics metrics $opts
+	generate_library_report.py --libName $libName --outDir $outDir --libStruct $libJson --libMetrics metrics $opts
 """
 }
 
@@ -145,87 +191,85 @@ script:
 // Runs cell-filtering, sample metrics, sample report and cell-typing/clustering
 // This does not run the library-level (fastq) report, since that depends on the 
 // bcParser metrics and the samples might come from more than 1 library (pipeline / bcParser run).
-workflow sampleReporting {
+workflow SAMPLE_REPORTING {
 take:
-	samples		// each row from samples.csv parsed into a channel
-	libJson  // library structure json file
-	isBarnyard // Bool indicating if the genome is barnyard
-	trimStats // Read trimming statistics from previous pipeline run
-	filterMtx // Cell metrics for individual samples ('id') and ('merged') samples
-	hashResults // Hash metrics if --scalePlex
+	samples	     // each row from samples.csv parsed into a channel
+	libJson      // library structure json file
+	isBarnyard   // Bool indicating if the genome is barnyard
+	filterMtx    // Cell metrics for individual samples ('id') and ('merged') samples
+	hashResults  // Hash metrics if --scalePlex
 main:
-	trimStats.dump(tag:'trimStats')
-
-	// Group cutadapt statistics by sample
-	// All split-fastq subsamples of the form "sampleName_wellCoordinate" are grouped together
-	// This is a no-op if splitFastq false
-	trimStats.map {
-		def sample = it[0].tokenize("_")[0]
-		def file = it[1]
-		tuple(sample, file)
-	}.groupTuple()
-	.map { tuple(it[0], it[1].flatten())} // Flatten list of empty lists in case of --reporting and --trimStats
-	.dump(tag:'trimStatsBySample')
-	.set{ trimStatsBySample }
-
 	if(params.seurat || params.azimuth || params.annData){
-		downstream(samples, filterMtx.id.allCells, filterMtx.id.filteredMtx, filterMtx.id.rawMtx, filterMtx.id.sampleStats)
+		DOWNSTREAM(samples, filterMtx.id.allCells, filterMtx.id.filteredMtx, filterMtx.id.sampleStats, libJson, false)
 		if(params.compSamples){
-			compareDownstream(samples, filterMtx.id.allCells, filterMtx.id.filteredMtx, filterMtx.id.rawMtx, filterMtx.id.sampleStats)
+			COMPARE_DOWNSTREAM(samples, filterMtx.id.allCells, filterMtx.id.filteredMtx, filterMtx.id.sampleStats, libJson, true)
 		}
 	}
 	// Run reporting on original (un-merged) samples
-	sampleReport(samples, libJson, trimStatsBySample, isBarnyard, filterMtx.id.allCells, filterMtx.id.libCount, filterMtx.id.sampleStats, hashResults.id)
-	sampleStats = sampleReport.out.sampleStats
+	SAMPLE_REPORT(samples, libJson, isBarnyard, filterMtx.id.allCells, filterMtx.id.allBarcodes, filterMtx.id.libCount, filterMtx.id.sampleStats, filterMtx.id.soloLog, hashResults.id, false)
+	sampleStats = SAMPLE_REPORT.out.sampleStats
 
 	if (params.merge) {
-		// Collect all trimStats for one sample (group) into a single list.
-		// The reporting step will sum them up.
-		samples
-		.map{ tuple(it.id, it.group) }
-		.join(trimStatsBySample)
-		.groupTuple(by:1) 
-		.map { tuple(it[1], it[2].flatten())} // Flatten here for splitFastq where each sub-sample already is a list
-		.dump(tag:'mergeTrimStats')
-		.set { mergeTrimStats }
-
 		if(params.seurat || params.azimuth || params.annData){
-			mergedDownstream(samples, filterMtx.merged.allCells, filterMtx.merged.filteredMtx, filterMtx.merged.rawMtx, filterMtx.merged.sampleStats)
+			MERGED_DOWNSTREAM(samples, filterMtx.merged.allCells, filterMtx.merged.filteredMtx, filterMtx.merged.sampleStats, libJson, false)
 		}
-		// Run reporting on merged samples (if any)
-		mergeSampleReport(samples, libJson, mergeTrimStats, isBarnyard, filterMtx.merged.allCells, filterMtx.merged.libCount, filterMtx.merged.sampleStats, hashResults.merged)
-		sampleStats = sampleStats.concat(mergeSampleReport.out.sampleStats)
+		// Run reporting on merged samples
+		MERGE_SAMPLE_REPORT(samples, libJson, isBarnyard, filterMtx.merged.allCells, filterMtx.merged.allBarcodes, filterMtx.merged.libCount, filterMtx.merged.sampleStats, filterMtx.merged.soloLog, hashResults.merged, true)
+		sampleStats = sampleStats.concat(MERGE_SAMPLE_REPORT.out.sampleStats)
 	}	
-	multiSampleReport(sampleStats.collect()) // Combined original and merged samples
+	MultiSampleReport(sampleStats.collect()) // Combined original and merged samples
 }
 
 //// Full workflow
 // Get input reads (fastq or bcl), run barcode parsing, alignment and reporting
-workflow endToEnd {
+workflow END_TO_END {
 take:
-	samples		// each row from samples.csv parsed into a channel
-	samplesCsv  // samples.csv file
-	libJson  // library structure json file
-	genome // Reference genome
+	samples		 // each row from samples.csv parsed into a channel
+	samplesCsv   // samples.csv file
+	libStructure // parsed library structure information
+	libJson      // library structure json file
+	scalePlexLibJson // ScalePlex library structure json file
+	scalePlexToRnaMapping // File with mapping of ScalePlex to RNA PCR barcodes
+	genome       // Reference genome
+	barcodeUnwrappedSamplesCsv // samples csv with barcode ranges unwrapped
+	runLibDetection // Run library detection
 main:
-	// inputReads gets/generates fastq files and runs bcParser to demux per sample
-	inputReads(samples, samplesCsv, libJson, params.runFolder, params.fastqDir)
-	libJsonContents = loadJson(libJson)
+	if (params.ultimaCramDir) {
+		ULTIMA(samples, barcodeUnwrappedSamplesCsv)
+		alignmentInput = ULTIMA.out.alignmentInput
+		ubamHash = ULTIMA.out.ubamHash
+		// Construct totalSampleReadsBySampleID channel and set it to 0 for all samples
+		samples
+			.filter { it.rnaId == null } // Only RNA samples are passed on to FILTER_MTX
+			.map {
+				tuple(it.id, 0)
+			}
+			.set { totalSampleReadsBySampleID }
+	}
+	else {
+		// INPUT_READS gets/generates fastq files and runs bcParser to demux per sample
+		INPUT_READS(samples, samplesCsv, libStructure, libJson, scalePlexLibJson, params.runFolder, params.fastqDir, runLibDetection)
+		alignmentInput = INPUT_READS.out.ubam
+		ubamHash = INPUT_READS.out.ubamHash
+		totalSampleReadsBySampleID = INPUT_READS.out.totalSampleReadsBySampleID
+		samples = INPUT_READS.out.samples
+	}
 	// STARSolo
-	alignment(inputReads.out.fqs, libJsonContents, genome)
+	ALIGNMENT(alignmentInput, genome)
 	// Cell calling and metrics generation
 	isBarnyard = genome.get('isBarnyard', false)
-	filterMtx(samples, libJson, alignment.out.soloOut, isBarnyard)
+	// Cell calling and metrics generation
+	FILTER_MTX(samples, libJson, ALIGNMENT.out.soloOut, isBarnyard, ALIGNMENT.out.soloLog, totalSampleReadsBySampleID, false)
 	if (params.merge) {
 		// This returns merged samples only for samples with multiple libraries
 		// (Same sample name, different libName)
-		mergedFilterMtx(samples, libJson, alignment.out.soloOut, isBarnyard)
+		MERGED_FILTER_MTX(samples, libJson, ALIGNMENT.out.soloOut, isBarnyard, ALIGNMENT.out.soloLog, totalSampleReadsBySampleID, true)
 	}
 	//// ScalePlex
 	if (params.scalePlex) {
-		SCALE_PLEX(libJson, samples, inputReads.out.barcodesCsv,
-			[id: filterMtx.out.allCells, merged: params.merge ? mergedFilterMtx.out.allCells : null],
-			[id: filterMtx.out.libCount, merged: params.merge ? mergedFilterMtx.out.libCount : null],
+		SCALE_PLEX(scalePlexLibJson, scalePlexToRnaMapping, samples, ubamHash,
+			[id: FILTER_MTX.out.allCells, merged: params.merge ? MERGED_FILTER_MTX.out.allCells : null],
+			[id: FILTER_MTX.out.libCount, merged: params.merge ? MERGED_FILTER_MTX.out.libCount : null],
 			[]) // perSampleCountRaw is empty if not a --reporting run
 		SCALE_PLEX
 			.out.metrics
@@ -247,13 +291,13 @@ main:
 	}
 	//// REPORTING
 	// Per sample QC report
-	sampleReporting(samples, libJson, isBarnyard, inputReads.out.trimFqStats,
-		[id: filterMtx.out, merged: params.merge ? mergedFilterMtx.out : null],
+	SAMPLE_REPORTING(samples, libJson, isBarnyard,
+		[id: FILTER_MTX.out, merged: params.merge ? MERGED_FILTER_MTX.out : null],
 		[id: hashResults, merged: params.merge ? mergedHashResults : null])
 
 	// Per library QC report
-	filterMtx
-		.out.allCells
+	FILTER_MTX
+		.out.allBarcodes
 		.map {
 			tuple(it[1], it[0], it[2]) // [libName, sample, allCells]
 		}.groupTuple()
@@ -270,62 +314,172 @@ main:
 		).set { metricsByLib }
 	}
 
-	fastqMetricsGeneration(metricsByLib)
+	LibraryMetricsGeneration(metricsByLib)
 
-	inputReads
-		.out.metrics.join(fastqMetricsGeneration.out)
-		.dump(tag:'fastqReportMetrics')
-		.set { fastqReportMetrics }
-	fastqReportGeneration(fastqReportMetrics, libJson.getName(), libJson.getParent(), inputReads.out.hashLibNames)
+	if (params.ultimaCramDir) {
+		// Empty list indicates bcParser demux metrics, which do not exist when starting from cram files
+		LibraryMetricsGeneration.out
+			.map { tuple(it[0], [], it[1]) }
+			.set { libraryReportMetrics }
+	}
+	else {
+		INPUT_READS
+			.out.metrics.join(LibraryMetricsGeneration.out)
+			.set { libraryReportMetrics }
+	}
+	libraryReportMetrics.dump(tag:'libraryReportMetrics')
+	// Get hash lib names
+	samples
+		.filter { it.rnaId != null }
+		.collect { it.libName }
+		.ifEmpty { [] }
+		.dump(tag:'hashLibNames')
+		.set { hashLibNames }
+	LibraryReportGeneration(libraryReportMetrics, libJson.getName(), libJson.getParent(), scalePlexLibJson.getName(), scalePlexLibJson.getParent(), hashLibNames)
+	
+	// Barcode stats do not exist when starting from ultima cram files 
+	if (params.internalReport && !params.ultimaCramDir) {
+		MultiLibraryReport(LibraryReportGeneration.out.typeLevelMatches.collect(), LibraryReportGeneration.out.overallMatches.collect())
+	}
 }
 
 //// Main entry point
 // Run the workflow for one or multiple samples
 // either from reads (--runFolder/ --fastqDir) or pre-existing alignment results (--resultDir)
 workflow {
-	// Validate and print key pipeline parameters
-	ParamLogger.initialise(workflow, params, log)
-	// Compute library structure json path to enable staging in of json file to downstream processes
+	runLibDetection = shouldRunLibDetection(file(params.samples, checkIfExists:true))
+	// Load library structure json and reference genome
 	libJson = expandPath(params.libStructure, file(projectDir) / "references")
-	// Fill in samples csv with defaults and workflow specific parameters
-	regularizeSamplesCsv(file(params.samples, checkIfExists:true), libJson.getName(), libJson.getParent())
-	samplesCsv = regularizeSamplesCsv.out
+	libStructure = Utils.loadJson(libJson)
+	// Load scalePlex library structure json
+	scalePlexLibJson = expandPath(params.scalePlexLibStructure, file(projectDir) / "references")
+	scalePlexToRnaMapping = resolveScalePlexToRnaMapping(scalePlexLibJson)
+	// Prepare and load samples.csv
+	RegularizeSamplesCsv(file(params.samples, checkIfExists:true), libJson.getParent(), libJson.getName(), scalePlexToRnaMapping)
+	samplesCsv = RegularizeSamplesCsv.out.samples_csv
 	samples = samplesCsv.splitCsv(header:true, strip:true)
 	samples.dump(tag:'samples')
+
+	if (params.ultimaCramDir) {
+		RegularizeSamplesCsv.out.barcode_unwrapped_samples_csv.splitCsv(header:true, strip:true)
+			.map { [it.id, it.libName, it.barcode] }
+			.dump(tag:'barcodeUnwrappedSamplesCsv')
+			.set {barcodeUnwrappedSamplesCsv}
+	} else {
+		barcodeUnwrappedSamplesCsv = []
+	}
+	
 	genome = loadGenome(file(params.genome, checkIfExists:true))
 
 	if (params.reporting) {
+		samples
+			.map { it.sample }
+			.unique()
+			.collect()
+			.dump(tag:'sampleNames')
+			.set { sampleNames }
+		
+		samples
+			.filter { it.resultDir == null }
+			.map { 
+				ParamLogger.throwError("Sample ${it.id} does not have a resultDir")
+			}
+
+		// Filter out sample-library combinations not present in the resultDir
+		samples
+			.filter { it.rnaId == null &&  !(file(it.resultDir) / "alignment" / "${it.id}" / "${it.id}.star.solo").exists() }
+			.map { it.id }
+			.collect()
+			.dump(tag:'missingLibs')
+			.set { missingLibs }
+			
+		samples
+			.filter {
+				// Keep sample-library combinations present in the resultDir
+				def id = it.rnaId ?: it.id
+				!(id in missingLibs.val)
+			}
+			.dump(tag:'filteredSamples')
+			.set { samples }
+			
+		// Check that no samples were completely filtered out
+		samples
+			.map { it.sample }
+			.unique()
+			.collect()
+			.ifEmpty { [] }
+			.dump(tag:'filteredSampleNames')
+			.set { filteredSampleNames }
+			
+		sampleNames
+			.flatMap()
+			.filter { !(it in filteredSampleNames.val) }
+			.map {
+				ParamLogger.throwError("Sample ${it} was not found in the resultDir")
+			}
+
 		// Load STARsolo output from previous pipeline output directory
 		samples
 			.filter { it.rnaId == null } // Only RNA samples have alignment results
 			.map {
-				alignmentDir = file(it.resultDir) / "alignment"
-				tuple(it.id, file(alignmentDir / "${it.id}/${it.id}.star.solo", checkIfExists:true))
+				def alignmentDir = file(it.resultDir) / "alignment"
+				tuple(it.id, file(alignmentDir / "${it.id}" / "${it.id}.star.solo", checkIfExists:true))
 			}
 			.set { soloOut }
-		// We are skipping read trimming statistics when re-running reporting
-		// Doesn't matter for anything other than the field in the HTML report
-		trimStats = samples.map{ tuple(it.id, []) }
+		// Load STARsolo log file from previous pipeline output directory
+		samples
+			.filter { it.rnaId == null } // Only RNA samples have alignment results
+			.map {
+				def alignmentDir = file(it.resultDir) / "alignment"
+				tuple(it.id, file(alignmentDir / "${it.id}" / "${it.id}.star.align" / "Log.final.out", checkIfExists:true))
+			}
+			.set { soloLog }
+		// Get totalSampleReads per sample from allSamples.reportStatistics.csv
+		samples
+			.filter { it.rnaId == null }
+			.map { file(file(it.resultDir) / "reports" / "allSamples.reportStatistics.csv", checkIfExists:true) }
+			.unique() // Multiple samples can have same resultDir
+			.map { reportStatistics ->
+				def lines = reportStatistics.text.readLines()
+				def header = lines[0].split(',')
+				// Get row with "Total Sample Reads"
+				def totalSampleReadsRow = lines.find { it.split(',')[1] == 'Total Sample Reads' }.split(',')
+				// Ignore column names with merged, Category and Metric in the header
+				// Remaining column names are sample names (sampleName.libName)
+				def totalSampleReads = header.findAll { !it.contains('merged') && it != 'Category' && it != 'Metric' }
+					.collect { sampleName -> 
+						[sampleName, totalSampleReadsRow[header.toList().indexOf(sampleName)]]
+					}
+				totalSampleReads
+			}
+			// flatMap because totalSampleReads is a list of lists
+			.flatMap { totalSampleReads -> 
+				totalSampleReads.collect { sampleReadPair -> 
+					tuple(sampleReadPair[0], sampleReadPair[1])
+				}
+			}
+			.dump(tag:'totalSampleReadsBySampleID')
+			.set { totalSampleReadsBySampleID }
 		// Cell calling and metrics generation
 		isBarnyard = genome.get('isBarnyard', false)
-		filterMtx(samples, libJson, soloOut, isBarnyard)
+		FILTER_MTX(samples, libJson, soloOut, isBarnyard, soloLog, totalSampleReadsBySampleID, false)
 		if (params.merge) {
 			// This returns merged samples only for samples with multiple libraries
 			// (Same sample name, different libName)
-			mergedFilterMtx(samples, libJson, soloOut, isBarnyard)
+			MERGED_FILTER_MTX(samples, libJson, soloOut, isBarnyard, soloLog, totalSampleReadsBySampleID, true)
 		}
 		//// ScalePlex
 		if (params.scalePlex) {
 			samples
 				.filter { it.rnaId != null } // Hash samples
 				.map {
-					scalePlexDir = file(it.resultDir) / "scaleplex"
-					[[lib: it.libName, sample: it.sample], file(scalePlexDir / "${it.id}.cellMetrics.csv", checkIfExists: true), file(scalePlexDir / "${it.id}.raw.matrix/matrix.mtx", checkIfExists: true)]
+					def scalePlexDir = file(it.resultDir) / "scaleplex"
+					[[lib: it.libName, sample: it.sample], file(scalePlexDir / "${it.id}.cellMetrics.parquet", checkIfExists: true), file(scalePlexDir / "${it.id}.raw.matrix/matrix.mtx.gz", checkIfExists: true)]
 				}
 				.set { perSampleCountRaw}
-			SCALE_PLEX_REPORTING(libJson, samples, [], // barcodesCsv is not used for reporting
-				[id: filterMtx.out.allCells, merged: params.merge ? mergedFilterMtx.out.allCells : null],
-				[id: filterMtx.out.libCount, merged: params.merge ? mergedFilterMtx.out.libCount : null],
+			SCALE_PLEX_REPORTING(scalePlexLibJson, scalePlexToRnaMapping, samples, [], // ubam is not used for reporting
+				[id: FILTER_MTX.out.allCells, merged: params.merge ? MERGED_FILTER_MTX.out.allCells : null],
+				[id: FILTER_MTX.out.libCount, merged: params.merge ? MERGED_FILTER_MTX.out.libCount : null],
 				perSampleCountRaw)
 			SCALE_PLEX_REPORTING
 				.out.metrics
@@ -345,19 +499,19 @@ workflow {
 			hashResults = []
 			mergedHashResults = []
 		}
-		sampleReporting(samples, libJson, isBarnyard, trimStats,
-			[id: filterMtx.out, merged: params.merge ? mergedFilterMtx.out : null],
+		SAMPLE_REPORTING(samples, libJson, isBarnyard,
+			[id: FILTER_MTX.out, merged: params.merge ? MERGED_FILTER_MTX.out : null],
 			[id: hashResults, merged: params.merge ? mergedHashResults : null])
 	} else {
-		endToEnd(samples, samplesCsv, libJson, genome)
+		END_TO_END(samples, samplesCsv, libStructure, libJson, scalePlexLibJson, scalePlexToRnaMapping, genome, barcodeUnwrappedSamplesCsv, runLibDetection)
 	}
 }
 
 
-//// When the workflow completes, publish 'workflow_info.json' containing information pipeline metadata
+//// When the workflow completes, publish 'workflow_info.json' containing information on pipeline metadata
 workflow.onComplete {
 	testing = false
-	def workflow_data = ["Nextflow Information": 
+	def workflow_data = ["Nextflow Information":
 		["Execution status": "${ workflow.success ? 'OK' : 'failed' }",
 		"Run name": "$workflow.runName",
 		"Pipeline completion timestamp": "$workflow.complete",
@@ -393,8 +547,9 @@ workflow.onComplete {
 		}
 	}
 
-	def json_str = JsonOutput.toJson(manifest_data + workflow_data +params_data+reference_data)
-	def json_beauty = JsonOutput.prettyPrint(json_str)
-	workflow_info = file(params.outDir) / "workflow_info.json"
+	def json_str = groovy.json.JsonOutput.toJson(manifest_data + workflow_data +params_data+reference_data)
+	def json_beauty = groovy.json.JsonOutput.prettyPrint(json_str)
+	def workflow_info = file(params.outputDir) / "workflow_info.json"
 	workflow_info.write(json_beauty)
 }
+

@@ -3,23 +3,21 @@
 A sample table (e.g. [samples.csv](examples/samples.csv)) file is used to list the samples included in an analysis run, their sample barcode (RT) sequences and optional sample-specific analysis parameters.
 
 It is a comma separated file (csv), with a header line (column names), followed by one sample per line. 
-The first column is required to be `sample` and contains the name of each sample. All other columns are optional. _Column names are case sensitive!_
+The first column is required to be `sample` and contains the name of each sample. All other columns are optional.
 
  Column | Description | Example
 :---- | ---- | :----:
 sample | Sample name | Foobar-2
 barcodes | RT-plate wells used for this sample (optional) | 1A-2H
-libName | Name for the overall sequencing library / fastq files (optional) | ScaleRna
+libIndex2 | PCR indices (semicolon separated) used for this experiment (optional) | QSR-1;QSR-2
 expectedCells | Approximate number of cells in this sample (optional) | 50000
 
-* `sample` and `libName` should consist only of letters, numbers and dashes (`-`) and start with a letter.
-* A single `libName` should be used for all samples in a ScaleRNA sequencing library (one final distribution plate); not a different one per sample.
-    * When running from fastq file input, `libName` should match the first part of the fastq file name for this library, e.g.: `ScaleRNA` for `ScaleRNA_*.fastq.gz`.
-    * See [samples.ext.csv](examples/extended-throughput/samples.ext.csv) for an example with two libraries for two extended-throughput plates
+* `sample` should consist only of letters, numbers and dashes (`-`) and start with a letter.
+* `libIndex2` is optional. If it is left out, all PCR indices will be defaulted in, and the workflow will deduce which ones are present.
 * `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution.
 
 ## Demultiplexing samples
-During analysis the sequencing data is first converted into library fastq files (`libName` column). If multiple samples were included in one sequencing library, these are then demultiplexed based on the sample (RT) barcodes. E.g.
+During analysis the sequencing data is first converted into library fastq files. If multiple samples were included in one sequencing library, these are then demultiplexed based on the sample (RT) barcodes. E.g.
 
 sample | barcodes
 -- | --

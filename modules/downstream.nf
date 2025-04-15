@@ -1,140 +1,167 @@
-/// This module perform downstream analysis of scRNA-seq data. 
-/// It performs seurat-based clustering, azimuth-based cell type annotation, and optionally scrublet doublet detection.
-/// The reults from these tools are visualized with an html report.
+/*
+* Perform downstream analysis of ScaleBio scRNA-seq data
+* It performs seurat-based clustering, azimuth-based cell type annotation, and optionally makes an anndata object
+*
+* Processes:
+*     SeuratClustering
+*     AzimuthMapping
+*     RnaDashboard
+*     CombineResults
+*     MakeAnnData
+*/
 
-nextflow.enable.dsl=2
+process SeuratClustering {
+	tag "$sample"
+	label "seuratv5"
+	// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
+	// If comparison is false the sample Id is used as the output directory.
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "*_SeuratObject.rds", mode: 'copy'
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "*_seurat_clustering_results.csv", mode: 'copy'
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "*_seurat_cluster_markers.csv", mode: 'copy'
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
 
-process seuratClustering {
-input:
+	input:
 	tuple(val(sample), path(soloOut), path(cellReadMetrics))
-output:
+	val(comparison)
+	
+	output:
 	tuple(val(sample), path("*_seurat_clustering_results.csv"), emit: results)
 	tuple(val(sample), path("*_SeuratObject.rds"), emit: object)
 	tuple(val(sample), path("*_seurat_cluster_markers.csv"))
 	tuple(val(sample), path("*_bpcells", type: 'dir'))
-tag "$sample"
-label "seuratv5"
-// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
-// If comparison is false the sample Id is used as the output directory.
-publishDir { out_dir }, pattern: "*_SeuratObject.rds", mode: 'copy'
-publishDir { out_dir }, pattern: "*_seurat_clustering_results.csv", mode: 'copy'
-publishDir { out_dir }, pattern: "*_seurat_cluster_markers.csv", mode: 'copy'
-publishDir { out_dir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
-script:
-	out_dir = file(params.outDir) / "cellTyping"
-	if (params.comparison) {
-		workflow = "comparison"
-		out_dir = out_dir / "${sample}_allSamples"
+
+	script:
+	if(comparison){
+		wf = "comparison"
+		cellTypingDir = "cellTyping/${sample}_allSamples"
 	} else {
-		workflow = "standard"
-		out_dir = out_dir / sample
+		wf = "standard"
+		cellTypingDir = "cellTyping/$sample"
 	}
-"""
-	seuratClusteringV5.r --project $sample $workflow \
+	"""
+	seuratClusteringV5.r --project $sample $wf \
 	--matrixDir $soloOut --allCells $cellReadMetrics
-"""
+	"""
 }
 
-process azimuthMapping {
-input:
+process AzimuthMapping {
+	tag "$sample"
+	label "seuratv5"
+	// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
+	// If comparison is false the sample Id is used as the output directory.
+	publishDir { file(params.outputDir) / azimuthDir }, pattern: "*_AzimuthObject.rds", mode: 'copy'
+	publishDir { file(params.outputDir) / azimuthDir }, pattern: "*_azimuth_mapping_results.csv", mode: 'copy'
+	publishDir { file(params.outputDir) / azimuthDir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
+
+	input:
 	tuple(val(sample), path(soloOut), path(cellReadMetrics))
-output:
+	val(comparison)
+	
+	output:
 	tuple(val(sample), path("*_azimuth_mapping_results.csv"), emit: results)
 	tuple(val(sample), path("*_AzimuthObject.rds"), emit: object)
 	tuple(val(sample), path("*_bpcells", type: 'dir'))
-tag "$sample"
-label "seuratv5"
-// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
-// If comparison is false the sample Id is used as the output directory.
-publishDir { out_dir }, pattern: "*_AzimuthObject.rds", mode: 'copy'
-publishDir { out_dir }, pattern: "*_azimuth_mapping_results.csv", mode: 'copy'
-publishDir { out_dir }, pattern: "*_bpcells", mode: 'copy', type: 'dir'
-script:
-	out_dir = file(params.outDir) / "cellTyping"
-	if (params.comparison) {
-		workflow = "comparison"
-		out_dir = out_dir / "${sample}_allSamples"
+
+	script:
+	if(comparison){
+		wf = "comparison"
+		azimuthDir = "cellTyping/${sample}_allSamples"
 	} else {
-		workflow = "standard"
-		out_dir = out_dir / sample
+		wf = "standard"
+		azimuthDir = "cellTyping/$sample"
 	}
-"""
+	"""
 	azimuthMappingV5.r --reference ${params.azimuthRef} --project $sample \
-	$workflow --matrixDir $soloOut --allCells $cellReadMetrics
-"""
+	$wf --matrixDir $soloOut --allCells $cellReadMetrics
+	"""
 }
 
-process rnaDashboard {
-input:
+process RnaDashboard {
+	tag "$sample"
+	label "reporting"
+	// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
+	// If comparison is false the sample Id is used as the output directory.
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "report.html", mode: 'copy', saveAs: {_filename -> "${sample}.html"}
+	publishDir { file(params.outputDir) / cellTypingDir }, pattern: "*_summary.csv", mode: 'copy'
+
+	input:
 	tuple(val(sample), path("results.csv"), path("sampleStats.csv"), path("report.rmd"))
-output:
+	path("lib.json")
+	val(comparison)
+	
+	output:
 	path("report.html")
 	path("*_summary.csv")
-tag "$sample"
-label "reporting"
-// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
-// If comparison is false the sample Id is used as the output directory.
-publishDir { out_dir }, pattern: "report.html", mode: 'copy', saveAs: {filename -> "${sample}.html"}
-publishDir { out_dir }, pattern: "*_summary.csv", mode: 'copy'
-script:
-	out_dir = file(params.outDir) / "cellTyping"
-	if (params.comparison) {
-		out_dir = out_dir / "${sample}_allSamples"
+
+	script:
+	cellTypingDir = "cellTyping"
+	if (comparison) {
+		cellTypingDir += "/${sample}_allSamples"
 	} else {
-		out_dir = out_dir / sample
+		cellTypingDir += "/${sample}"
 	}
-"""
-	renderRNADash.r --rmdPath report.rmd --results results.csv --sampleStats sampleStats.csv --comparison $params.comparison
-"""
+	"""
+	renderRNADash.r --rmdPath report.rmd --results results.csv --sampleStats sampleStats.csv --comparison $comparison
+	"""
 }
 
-process combineResults {
-input:
+process CombineResults {
+	tag "$sample"
+	label "reporting"
+	// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
+	// If comparison is false the sample Id is used as the output directory.
+	publishDir { file(params.outputDir) / "cellTyping" / (comparison ? "${sample}_allSamples" : sample) }, pattern: "*_combinedResults.csv", mode: 'copy', saveAs: {_filename -> "${sample}_cellTypingResults.csv"}
+
+	input:
 	tuple(val(sample), path(results))
-output:
+	val(comparison)
+
+	output:
 	tuple(val(sample), path("*_combinedResults.csv"), emit: results)
-tag "$sample"
-label "reporting"
-// If comparison is true "_allSamples" is added as a suffix to the comparison group Id. This value is then used as the output directory.
-// If comparison is false the sample Id is used as the output directory.
-publishDir { file(params.outDir) / "cellTyping" / (params.comparison ? "${sample}_allSamples" : sample) }, pattern: "*_combinedResults.csv", mode: 'copy', saveAs: {filename -> "${sample}_cellTypingResults.csv"}
-script:
-"""
+
+	script:
+	"""
 	combineDownstreamResults.r --resultsDir ./ --sample $sample
+	"""
+}
+
+process MakeAnnData {
+	tag "$id"
+	label "anndata"
+	// If comparison is true search for file named "merged_anndata.h5ad", otherwise search for any file with the suffix _anndata.h5ad
+	publishDir file(params.outputDir) / "samples", pattern: params.comparison ? "merged_anndata.h5ad" : "*_anndata.h5ad", mode: 'copy', saveAs: {filename -> "${id}_anndata.h5ad" }
+
+	input:
+	tuple(val(id), path("filtered_mtx_dir"), path("all_cells"), val(name))
+	
+	output:
+	tuple(val(id), path("*_anndata.h5ad"), emit: annData)
+	
+	script:
+	mtx_dirs = filtered_mtx_dir.join(" ")
+	all_cells_files = all_cells.join(" ")
+	sample_names = name.join(" ")
+"""
+	build_anndata.py --matrix_dir $mtx_dirs --all_cells $all_cells_files --sample_ids $sample_names
 """
 }
 
-process makeAnnData {
-input:
-	tuple(val(sample), path(soloOut), path(cellReadMetrics))
-output:
-	tuple(val(sample), path("*_anndata.h5ad"), emit: annData)
-tag "$sample"
-label "seuratv5"
-publishDir file(params.outDir) / "samples", pattern: "*_anndata.h5ad", mode: 'copy', saveAs: {filename -> params.comparison ? "${sample}_allSamples.h5ad" : "${sample}.h5ad"}
-script:
-mtxDir = soloOut.join(" ")
-"""
-	downstream_make_anndata.r --matrixDir $mtxDir --sampleId $sample
-"""
-}
-
-workflow downstream {
+workflow DOWNSTREAM {
 take:
 	samples
 	allCells
 	filteredMtx
-	rawMtx
 	sampleStats
+	libJson
+	comparison
 main:
 	// allCells -> [sampleId, path(allCells.csv)]
 	allCells = allCells.map{ tuple(it[0], it[2]) }
 	resultList = allCells
 	filteredMtxMeta = filteredMtx.join(allCells)
-	rawMtxMeta = rawMtx.join(allCells)
 
 	// If samples are being "compared" we need to group samples by their compSamples value.
-	if(params.comparison){
+	if (comparison){
 		// If compSamples is given in the samplesheet comparisonDict -> [sampleId, compSamples]
 		// Else comparisonDict -> [sampleId, ScaleRNA]. This gives all samples a common value to group on.
 		comparisonDict = samples.map{tuple(it.id, it.compSamples ? it.compSamples : "ScaleRNA")}
@@ -150,40 +177,54 @@ main:
 		resultList.dump(tag:'resultList')
 	}
 
-	if(params.seurat){
-		seuratClustering(filteredMtxMeta)
-		resultList = resultList.join(seuratClustering.out.results)
+	if (params.seurat){
+		SeuratClustering(filteredMtxMeta, comparison)
+		resultList = resultList.join(SeuratClustering.out.results)
 		resultList.dump(tag:'resultListSeurat')
 	}
 
-	if(params.azimuth){
-		azimuthMapping(filteredMtxMeta)
-		resultList = resultList.join(azimuthMapping.out.results)
+	if (params.azimuth){
+		AzimuthMapping(filteredMtxMeta, comparison)
+		resultList = resultList.join(AzimuthMapping.out.results)
 		resultList.dump(tag:'resultListAzimuth')
 	}
 
-	if(params.seurat || params.azimuth){
+	if (params.seurat || params.azimuth){
 		combineResultsInput = resultList.map{tuple(it[0], it.tail().flatten())}
 		combineResultsInput.dump(tag:'combineResultsInput')
-		combineResults(combineResultsInput)
-		if(params.comparison){
+		CombineResults(combineResultsInput, comparison)
+		if (comparison){
 			// When comparing samples there are multiple mad_threshold.csv files.
 			// Currently the downstream report does not handle this well.
 			// So we take the first file as "dummy" input and do not plot mad info in comparison reports.
 			// mad_thresh = path(mad_threshold.csv)
 			sample_stats = sampleStats.first().map{it[1]}
 			// dashInput = [sampleId, path(sampleId_DownstreamResults.csv), path(sampleId_mad_threshold.csv)]
-			dashInput = combineResults.out.results.combine(sample_stats)
+			dashInput = CombineResults.out.results.combine(sample_stats)
 		} else {
-			dashInput = combineResults.out.results.join(sampleStats)
+			dashInput = CombineResults.out.results.join(sampleStats)
 		}
 		// dashInput -> [sampleId/compSamples, path(DownstreamResults.csv), path(mad_threshold_info.csv), path(report.rmd) ]
 		dashInput = dashInput.combine(Channel.fromPath("$projectDir/bin/downstream_clustering_report.rmd", checkIfExists: true))
 		dashInput.dump(tag:'dashInput')
-		rnaDashboard(dashInput)
+		RnaDashboard(dashInput, libJson, comparison)
 	}
 
 	if(params.annData){
-		makeAnnData(filteredMtxMeta)
+
+		if(params.comparison){
+			comparisonDict
+				.map{ tuple it[1], it[2], it[3], it[0]}
+				.dump(tag:"makeAnnDataInput")
+				.set{ makeAnnDataInput } // makeAnnDataInput -> [ compSamples, [path(filteredMtx)], [path(allCells.csv)], [sampleId] ]
+			
+		} else {
+			filteredMtxMeta
+				.map{ tuple it[0], it[1], it[2], [it[0]]}
+				.dump(tag:"makeAnnDataInput")
+				.set{ makeAnnDataInput } // makeAnnDataInput -> [ sampleId, path(filteredMtx), path(allCells.csv), sampleId ]
+		}
+
+		MakeAnnData(makeAnnDataInput)
 	}
 }

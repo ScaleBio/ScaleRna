@@ -17,3 +17,5 @@ libStructure : libV1.1.json
 
 ### Path to a .json file defining the reference genome
 genome : ${projectDir}/docs/examples/genome.json
+
+quantum : false
