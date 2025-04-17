@@ -4,9 +4,9 @@ When using the ScalePlex Oligo Fixation Plate a separate enriched library is gen
 
 ## --scalePlex true
 
-When this parameter is set to true, the workflow looks for the ScalePlex reads as specified in the Sample Barcode Table (samples.csv) portion either from BCL or FASTQ input. Example file here: [scaleplex.samples.csv](/docs/examples/scaleplex/scaleplex.samples.csv)
+When this parameter is set to true, the workflow looks for the ScalePlex reads as specified in the Sample Barcode Table (samples.csv) portion either from BCL or FASTQ input. Example file here: [scaleplex.samples.csv](examples/scaleplex/scaleplex.samples.csv)
 
-- Note for Input Modes: When starting with fastq files or if the ScaleRNA and ScalePlex libraries were sequenced separately, fastq files will need to be generated for ScaleRNA and ScalePlex into separate files, then placed in one parent directory supplied in the `fastqDir` parameter (files can exist in subdirectories of this supplied path). See [Fastq Generation](fastqGeneration.md) and the example samplesheet.csv including ScalePlex libraries [ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv](/docs/examples/fastq-generation/ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv)
+- Note for Input Modes: When starting with fastq files or if the ScaleRNA and ScalePlex libraries were sequenced separately, fastq files will need to be generated for ScaleRNA and ScalePlex into separate files, then placed in one parent directory supplied in the `fastqDir` parameter (files can exist in subdirectories of this supplied path). See [Fastq Generation](fastqGeneration.md) and the example samplesheet.csv including ScalePlex libraries [ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv](examples/fastq-generation/ScaleRNA_3L_and_ET_with_ScalePlex_samplesheet_v1.1.csv)
 
 ## Sample Barcode Table (samples.csv)
 
@@ -15,7 +15,7 @@ There are additional **optional** columns for the Sample Barcode Table when runn
 |---------------------|---------------------|---------|
 | scalePlexLibName    | Name for the enriched ScalePlex library / fastq files, same structure as RNA library ([Fastq Generation](fastqGeneration.md)). Defaults to RNA library name with `-ScalePlex` appended   | ScalePlex       |
 | scalePlexLibIndex   | i7 sequences to associate with enriched library. Full sequence list here: [ScalePlex i7](../references/scaleplex_p7.txt)   | ScalePlex-A-AP1        |
-| scalePlexBarcodes   | Valid fixation plate wells for this sample, follows same specification scheme as the [RNA RT barcodes](/samplesCsv.md), but is in reference to the ScalePlex fixation plate   | 1A-6H        |
+| scalePlexBarcodes   | Valid fixation plate wells for this sample, follows same specification scheme as the [RNA RT barcodes](samplesCsv.md), but is in reference to the ScalePlex fixation plate   | 1A-6H        |
 
 ## Analysis parameters
 
@@ -60,7 +60,7 @@ There are additional **optional** columns for the Sample Barcode Table when runn
 ### reports
 - With the usage of ScalePlex in a workflow run, there are several amendments to the reporting structure that are worth noting. First and foremost is the generation of a library report for each ScalePlex library in the workflow. With ScalePlex, libraries are at the level of final distribution plates and extended throughput plates, such that for each final distribution plate used for your analysis will have both an RNA library report as well as a Scaleplex library report. These capture the read attribution per sample within the library, barcode validation pass rates, and Scaleplex oligo detection pass rates per read of the library.
 
-- Sample reporting, as defined by the individual rows of the Sample Barcode Table (samples.csv), will also have an updated "ScalePlex" tab that summarizes the performance of the ScalePlex data associated in the "ScalePlex Metrics" table. At a high level, these metrics are calculated much in the same way as are the RNA sample level metrics are, such as Reads Per Cell, Counts Per cell, Saturation, and Reads in Cells [qcReport.md](/qcReport.md) but they now reference the ScalePlex library fraction rather than the RNA material. In addition, we also report the "Percent of Cells with Assigned ScalePlex". Critically, the cells in which we are referring to here are those barcodes that were "called" a cell in the RNA analysis, so "Percent of Cells with Assigned ScalePlex" says how many cells called by RNA also had a valid ScalePlex assignment.
+- Sample reporting, as defined by the individual rows of the Sample Barcode Table (samples.csv), will also have an updated "ScalePlex" tab that summarizes the performance of the ScalePlex data associated in the "ScalePlex Metrics" table. At a high level, these metrics are calculated much in the same way as the [RNA sample level metrics](qcReport.md), such as Reads Per Cell, Counts Per cell, Saturation, and Reads in Cells, but they now reference the ScalePlex library fraction rather than the RNA material. In addition, we also report the "Percent of Cells with Assigned ScalePlex". Critically, the cells in which we are referring to here are those barcodes that were "called" a cell in the RNA analysis, so "Percent of Cells with Assigned ScalePlex" says how many cells called by RNA also had a valid ScalePlex assignment.
 
 - Other Reporting Figures:
     - Assigned ScalePlex Cell Counts: Bar chart of number of cells assigned each scaleplex well of origin
