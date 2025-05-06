@@ -21,8 +21,8 @@ readCountMatrix <- function(mtxDir, mtxName){
     sampleId <- sampleId[[1]]
 
     mtx <- file.path(mtxDir, mtxName)
-    genes <- file.path(mtxDir, "features.tsv")
-    cells <- file.path(mtxDir, "barcodes.tsv")
+    genes <- file.path(mtxDir, "features.tsv.gz")
+    cells <- file.path(mtxDir, "barcodes.tsv.gz")
 
     genes <- fread(file = genes, header = FALSE)[[2]]
     genes <- make.unique(names = genes, sep = "-")
@@ -61,7 +61,6 @@ readAllCellsData <- function(filePath){
   dat <- setnames(dat, old = 1, new = "cellBarcode")
   cellBarcodes <- paste0(dat[["cellBarcode"]], "_", dat[["sample"]])
   dat[["cellBarcode"]] <- cellBarcodes
-  dat <- dat[dat$pass == TRUE, ]
   
   return(dat)
 }
@@ -82,7 +81,7 @@ loadData <- function(argList){
 
   } else if(argList$workflow == "comparison"){
     
-    matList <- lapply(argList$matrixDir, readCountMatrix, mtxName = "matrix.mtx")
+    matList <- lapply(argList$matrixDir, readCountMatrix, mtxName = "matrix.mtx.gz")
     meta <- lapply(argList$allCells, readAllCellsData)
     meta <- rbindlist(meta)
     seurat <- CreateSeuratObject(
@@ -107,7 +106,7 @@ parseArguments <- function(){
         help = "Name of Azimuth Reference Dataset to use.")
     argParser$add_argument("--paramPath", action = "store", required = FALSE, default = FALSE,
         help = "Path to yaml file with Seurat function parameters.")
-    argParser$add_argument("--star_matrix", action = "store", required = FALSE, default = "matrix.mtx",
+    argParser$add_argument("--star_matrix", action = "store", required = FALSE, default = "matrix.mtx.gz",
         help = "Name of matrix file to use when loading UMI counts.")
     argParser$add_argument("--project", action = "store", required = TRUE)
 

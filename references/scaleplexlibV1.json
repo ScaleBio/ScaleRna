@@ -16,7 +16,8 @@
             "name": "lig",
             "sequences": "3lvlRNA_lig.txt",
             "level": 2,
-            "alias": "Ligation"
+            "alias": "Ligation",
+            "plate": true
         },
         {
             "read": "read1",
@@ -26,7 +27,8 @@
             "name": "rt",
             "sequences": "3lvlRNA_rt.txt",
             "level": 1,
-            "alias": "RT"
+            "alias": "RT",
+            "plate": true
         },
         {
             "read": "read1",
@@ -44,15 +46,20 @@
             "sequences": "3lvlRNA_pcr.txt",
             "level": 3,
             "alias": "i5",
-            "rev_comp": false
+            "rev_comp": false,
+            "plate": true
         },
         {
             "read": "read2",
             "start": 18,
             "length": 10,
             "name": "scaleplex",
+            "alias": "scaleplex",
+            "type": "target",
+            "tag": "sp",
             "sequences": "scaleplex.txt",
-            "mapping": "fixation.txt"
+            "mapping": "fixation.txt",
+            "alias": "scaleplex"
         }
 ],
 "sample_barcode": "rt",

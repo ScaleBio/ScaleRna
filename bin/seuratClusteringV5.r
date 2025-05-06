@@ -20,8 +20,8 @@ readCountMatrix <- function(mtxDir, mtxName){
     sampleId <- sampleId[[1]]
 
     mtx <- file.path(mtxDir, mtxName)
-    genes <- file.path(mtxDir, "features.tsv")
-    cells <- file.path(mtxDir, "barcodes.tsv")
+    genes <- file.path(mtxDir, "features.tsv.gz")
+    cells <- file.path(mtxDir, "barcodes.tsv.gz")
 
     genes <- fread(file = genes, header = FALSE)[[2]]
     genes <- make.unique(names = genes, sep = "-")
@@ -62,7 +62,6 @@ readAllCellsData <- function(filePath){
   dat <- setnames(dat, old = 1, new = "cellBarcode")
   cellBarcodes <- paste0(dat[["cellBarcode"]], "_", dat[["sample"]])
   dat[["cellBarcode"]] <- cellBarcodes
-  dat <- dat[dat$pass == TRUE, ]
   
   return(dat)
 }
@@ -175,7 +174,7 @@ comparisonWorkflow <- function(argList){
   
   message("Comparison Workflow")
 
-  matList <- lapply(argList$matrixDir, readCountMatrix, mtxName = "matrix.mtx")
+  matList <- lapply(argList$matrixDir, readCountMatrix, mtxName = "matrix.mtx.gz")
   
   metaDat <- lapply(argList$allCells, readAllCellsData)
   metaDat <- rbindlist(metaDat)
@@ -239,7 +238,7 @@ main <- function(){
     description = "This script performs Seurat based clustering and dimensionality reduction."
   )
 
-  argParser$add_argument("--star_matrix", required = FALSE, default = "matrix.mtx")
+  argParser$add_argument("--star_matrix", required = FALSE, default = "matrix.mtx.gz")
   argParser$add_argument("--project", required = TRUE)
 
   subParsers <- argParser$add_subparsers(

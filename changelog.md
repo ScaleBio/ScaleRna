@@ -1,6 +1,18 @@
+# Version 2.0
+## 2.0.1
+* Remove trimming of cDNA (RNA) read to max 82bp length
+* Make QuantumScale RNA the default library type
+## 2.0.0
+* Add support for QuantumScale kit v1.0
+* Run cutadapt upstream of barcode demux to do adapter trimming
+* Output unaligned BAM files post barcode demux, that are then sent to STAR as input
+* Perform read length filtering during barcode demux
+* Performance optimizations on ScalePlex assignment and reporting
+* For barnyard experiments cell calling is now performed on a species-by-species basis
+* Species specific metrics are now reported in the sample report for barnyard experiments
+* Added sF, gn, and gx tags to BAM file output by STAR
+
 # Version 1.6
-## 1.6.3
-* Fix remote URL in sample and library QC reports (HTML)
 ## 1.6.2
 * Fix erroneous channel dump in inputReads.nf that was triggered by Nextflow 24.10
 ## 1.6.1

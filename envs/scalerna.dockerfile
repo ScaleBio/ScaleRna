@@ -1,4 +1,4 @@
-FROM nfcore/base:2.1
+FROM continuumio/miniconda3
 # Path to yaml file containing conda dependencies
 ARG CONDA_YML_PATH=.
 RUN apt-get clean && apt-get update && \

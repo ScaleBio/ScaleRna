@@ -1,0 +1,20 @@
+{
+"barcodes" : [
+    {"read": "index2", "start": 0, "length": 8, "name": "PCR", "sequences": "quantum_scaleplex_pcr_pool.txt", "alias":"PCR", "level":3},
+    {"read": "index1", "start": 0, "length": 8, "name": "bead1", "sequences": "quantum_bead_barcode1.txt", "alias":"bead1", "level":2},
+    {"read": "index1", "start": 12, "length": 8, "name": "bead2", "sequences": "quantum_bead_barcode2.txt", "alias":"bead2", "level":2},
+    {"read": "index1", "start": 24, "length": 8, "name": "bead3", "sequences": "quantum_bead_barcode3.txt", "alias":"bead3", "level":2},
+    {"read": "read2", "start": 8, "length": 8, "name": "PBC", "sequences": "quantum_pbc.txt", "alias":"PBC", "level":1, "plate":true},
+    {"read": "read1", "start": 21, "length": 10, "name": "scaleplex", "type": "target", "tag": "sp", "sequences": "scaleplex.txt", "mapping": "fixation.txt", "alias":"scaleplex", "level":1},
+    {"read": "read2", "start":0, "length": 8, "name": "umi", "type": "umi"}
+],
+"scaleplex_to_rna_mapping": "scaleplex_to_rna_mapping.txt",
+"sample_barcode":"PBC",
+"bcl_convert": {
+    "library_barcodes": {"sequences":"quantum_scaleplex_pcr_pool.txt", "libIndexUsed":"libIndex2"},
+    "index1Seqs": "quantum_bead_barcode1.txt",
+    "index2Seqs": "quantum_scaleplex_pcr_pool.txt",
+    "index1BClen": 8,
+    "split_on": "index1,index2"
+}
+}

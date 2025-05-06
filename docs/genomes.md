@@ -5,10 +5,11 @@ The `genome.json` file includes
 
 Field |  Description | Required? | Example
 :-- | -- | -- | --
-name | The name of the species / genome-version | required | human 
-star_index | Path to the STAR index directory | required | `/PATH/TO/star.ref` 
+name | The name of the species / genome-version | required | `GRCh38` 
+star_index | Path to the STAR index directory | required | `/PATH/TO/starRef/` 
 gtf | Path to the gene annotation | optional | `filteredGTF/genes.gtf` 
 speciesName | Full name of the species from [OrgDb](https://www.bioconductor.org/packages/release/BiocViews.html#___OrgDb) | optional | Homo sapiens
+isBarnyard | Indicates that this is a combined multi-species genome | optional | false 
 
 * All files (`star_index`, `gtf`, ...) can be specified either as
     - an absolute path (`/path/to/genome`)
@@ -22,7 +23,7 @@ STAR --runMode genomeGenerate --runThreadN 16 --genomeDir star.ref --genomeFasta
 ```
 
 ### Annotation
-All transcripts in the _GTF_ file used to built the STAR index are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index.
+All transcripts in the _GTF_ file used to built the STAR index are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index. Only the `exon` entries in the GTF are relevant for STAR.
 
 ## Pre-built genomes
 Pre-build reference genome for human and mouse are available for download:

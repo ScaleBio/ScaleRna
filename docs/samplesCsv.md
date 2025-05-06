@@ -1,25 +1,27 @@
 # Sample table
 
-A sample table (e.g. [samples.csv](examples/samples.csv)) file is used to list the samples included in an analysis run, their sample barcode (RT) sequences and optional sample-specific analysis parameters.
+A sample barcode table file is used to list the samples included in an analysis run and optional sample-specific analysis parameters. Each _sample_ in the workflow is defined by its set of well positions on the RT plate. For example, cells from Donor1 were fixed and loaded into the first column of the RT plate. That first column, 1A-1H, would then define the "Donor1" sample in the sample barcode table. 
 
-It is a comma separated file (csv), with a header line (column names), followed by one sample per line. 
-The first column is required to be `sample` and contains the name of each sample. All other columns are optional. _Column names are case sensitive!_
+A set of examples for the different Quantum RNA configurations is included in [docs/examples/quantum-sample-barcode-tables](examples/quantum-sample-barcode-tables). It is a comma separated file (csv), with a header line (column names), followed by one sample per line. 
+The first column is required to be `sample` and contains the name of each sample. All other columns are optional.
 
  Column | Description | Example
 :---- | ---- | :----:
-sample | Sample name | Foobar-2
-barcodes | RT-plate wells used for this sample (optional) | 1A-2H
-libName | Name for the overall sequencing library / fastq files (optional) | ScaleRna
+sample | Sample name | PBMC-2
+barcodes | RT-plate wells used for this sample | 1A-2H
+libIndex2 | PCR indices (semicolon separated) used for this experiment (optional) | QSR-1;QSR-2
 expectedCells | Approximate number of cells in this sample (optional) | 50000
 
-* `sample` and `libName` should consist only of letters, numbers and dashes (`-`) and start with a letter.
-* A single `libName` should be used for all samples in a ScaleRNA sequencing library (one final distribution plate); not a different one per sample.
-    * When running from fastq file input, `libName` should match the first part of the fastq file name for this library, e.g.: `ScaleRNA` for `ScaleRNA_*.fastq.gz`.
-    * See [samples.ext.csv](examples/extended-throughput/samples.ext.csv) for an example with two libraries for two extended-throughput plates
-* `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution.
+*Note* 
 
-## Demultiplexing samples
-During analysis the sequencing data is first converted into library fastq files (`libName` column). If multiple samples were included in one sequencing library, these are then demultiplexed based on the sample (RT) barcodes. E.g.
+* `sample` should consist only of letters, numbers and dashes (`-`) and start with a letter
+* `barcodes` is optional if only a single sample was run. In that case all RT wells will be grouped together
+* `libIndex2` is optional. If it is left out, the workflow will search for all possible PCR indicies in the input data
+  * For data generated with the Scale RNA v1.1 kit, users should provide a `libIndex` column instead; for example "RNA-A-AP1"
+* `expectedCells` is optional. If it is left out or set to 0, the number will be estimated from the read count distribution
+
+## Sample Barcodes
+If multiple samples were included in the experiment, they are effectively pooled in the sequencing library, and the analysis workflow will demultiplex them based on the sample (RT) barcodes. E.g
 
 sample | barcodes
 -- | --

@@ -1,3 +1,2 @@
-sample,barcodes,libName
-PBMC-1,1A-6H,ScaleRNA
-PBMC-2,7A-12H,ScaleRNA
+sample,barcodes
+test-sample,1A;2A;3A

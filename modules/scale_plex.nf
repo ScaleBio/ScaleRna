@@ -12,59 +12,60 @@ include { SCALE_PLEX_REPORTING as MERGED_REPORTING } from './scale_plex_metrics.
 
 process CountScalePlex {
     tag "$meta.subsample"
-    label 'report'
 
     input:
     path(libStructDir) // Directory containing the library structure definition
     val(libStructName) // Filename of the library structure definition .json
-    tuple val(meta), path("barcodes_*.csv")
+    val(file_ext)
+    path(mapping_file) // File containing the mapping of scale plex to RNA PCR barcodes
+    tuple val(meta), path("barcodes_*.${file_ext}")
 
     output:
-    tuple val(meta), path("${id}.cellMetrics.csv"), path("${id}.raw.umi.mtx"), emit: countRaw
+    tuple val(meta), path("${id}.cellMetrics.parquet"), path("${id}.raw.umi.mtx.gz"), emit: countRaw
 
     script:
 	libStruct = "${libStructDir}/${libStructName}"
     id = meta.subsample + "." + meta.lib
+    opts = ""
+    if (mapping_file) {
+        opts = "--mapping_file $mapping_file "
+    }
     """
-    # Concatenate output from multiple bc_parser jobs
-    awk ' NR == 1 || FNR > 1 { print } ' barcodes_*.csv > barcodes.csv
-    count_hashes.py barcodes.csv --references $libStructDir --lib_struct $libStruct --id $id --outDir .
+    count_hashes.py --bamDir . --references $libStructDir --lib_struct $libStruct --id $id --min_read_umi_thresh $params.scalePlexMinReadUmi --outDir . $opts
     """
 }
 
 process MergeCountRaw {
     tag "$meta.sample"
-    label 'report'
+	label 'large'
 
     input:
     tuple val(meta), path(cellMetrics), path(mtx)
 
     output:
-    tuple val(meta), path("${id}.cellMetrics.csv"), path("${id}.raw.umi.mtx"), emit: countRaw
+    tuple val(meta), path("${id}.cellMetrics.parquet"), path("${id}.raw.umi.mtx.gz"), emit: countRaw
 
     script:
     id = meta.sample + "." + meta.lib
     """
-    # Merge cellMetrics csv files only taking header from first one
-    awk ' NR == 1 || FNR > 1 { print } ' $cellMetrics > ${id}.cellMetrics.csv
+    merge_metrics.py $cellMetrics --id $id
     merge_mtx.py $mtx --id $id
     """
 }
 
 process MergeSamples {
     tag "$meta.sample"
-    label 'report'
+	label 'large'
 
     input:
-    tuple val(meta), path(cellMetrics), path("raw_??????.mtx"), val(barcodes), val(rnaId) // pad filenames with 0s so they sort correctly
+    tuple val(meta), path(cellMetrics), path("raw_??????.mtx.gz"), val(barcodes), val(rnaId) // pad filenames with 0s so they sort correctly
 
     output:
-    tuple val(meta), path("${id}.cellMetrics.csv"), path("${id}.raw.umi.mtx"), emit: countRawMerged
+    tuple val(meta), path("${id}.cellMetrics.parquet"), path("${id}.raw.umi.mtx.gz"), emit: countRawMerged
     tuple val(meta), val(mergedBarcodes), emit: mergedBarcodes
 
     script:
     id = "${meta.sample}.merged"
-    rnaId = rnaId.join(" ")
     // merge expected fixation plate wells for each sample in the group
     if (barcodes.every { it }) {
         mergedBarcodes = barcodes.join(';')
@@ -73,24 +74,30 @@ process MergeSamples {
         mergedBarcodes = null
     }
     """
-    merge_metrics.py $cellMetrics --id $id --rnaId $rnaId
-    merge_mtx.py raw_*.mtx --id $id
+    merge_metrics.py $cellMetrics --id $id --rnaId ${rnaId.join(" ")}
+    merge_mtx.py raw_*.mtx.gz --id $id
     """
 }
 
 workflow SCALE_PLEX {
     take:
         libJson
+        scalePlexToRnaMapping
         samples
-        barcodesCsv
+        ubam
         allCells
         libCount
         perSampleCountRaw // provided if --reporting run
 
     main:
         if (!params.reporting) {
+            if (params.ultimaCramDir) {
+                file_ext = 'cram'
+            } else {
+                file_ext = 'bam'
+            }
             // CountScalePlex on output of bcParser, dropping where sample was not identified
-            CountScalePlex(libJson.getParent(), params.scalePlexLibStructure, barcodesCsv.filter { meta, _ -> meta.sample != 'Unknown' })
+            CountScalePlex(libJson.getParent(), libJson.getName(), file_ext, scalePlexToRnaMapping, ubam.filter { meta, _ubam_file -> meta.sample != 'Unknown' })
             CountScalePlex.out.countRaw
                 .map { meta, cellMetrics, rawUmi ->
                     // drop subsample that was used for splitting
@@ -115,7 +122,7 @@ workflow SCALE_PLEX {
                 .groupTuple(by: 3) // grouping on samples.csv group column
                 .filter { it[0].size() > 1 } // Only merge groups with more than one sample libname combination
                 .map { 
-                    meta, cellMetrics, rawUmi, group, scalePlexBarcodes, rnaId ->
+                    _meta, cellMetrics, rawUmi, group, scalePlexBarcodes, rnaId ->
                         [[lib:'merged', sample:group], cellMetrics, rawUmi, scalePlexBarcodes, rnaId]
                 }
                 .dump(tag:'perMergedSampleCountRaw')
@@ -123,7 +130,7 @@ workflow SCALE_PLEX {
             MergeSamples(perMergedSampleCountRaw)
             perMergedSampleCountRaw
                 .join(MergeSamples.out.mergedBarcodes)
-                .map { meta, cellMetrics, rawUmi, barcodes, rnaId, mergedBarcodes ->
+                .map { meta, _cellMetrics, _rawUmi, _barcodes, _rnaId, mergedBarcodes ->
                     // build samples channels for merging
                     ['libName':meta.lib, 'sample':meta.sample, 'rnaId':meta.sample, 'scalePlexBarcodes':mergedBarcodes]
                 }

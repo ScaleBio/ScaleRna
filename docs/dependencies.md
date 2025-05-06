@@ -28,4 +28,4 @@ See the [Nextflow documentation](https://www.nextflow.io/docs/latest/conda.html)
 
 ## Manual Dependency installation
 As a final alternative it is also possible to simply install the required dependencies directly, either by hand or using Conda.
-A list of all requirements can be found in `envs/scaleRna.conda.yml` and `envs/scalereport.conda.yml`. All tools need to be available on `$PATH` or in `/PATH/TO/ScaleRNA/bin/`
+A list of all requirements can be found in `envs/scalerna.conda.yml` and `envs/scalernareport.conda.yml`. All tools need to be available on `$PATH` or in `/PATH/TO/ScaleRNA/bin/`

@@ -17,9 +17,21 @@ options(rlang_backtrace_on_error = "full")
 library(ggplot2)
 library(dplyr)
 library(data.table)
+library(jsonlite)
 
 clusterDat <- fread(params$downstreamResults)
 rownames(clusterDat) <- clusterDat[["cellBarcode"]]
+
+libJson <- read_json("lib.json")
+
+#Loop to find the alias which is used for the sample barcode.
+#The sample barcode alias is then used in various plots to identify batch effects.
+for(list in libJson$barcodes){
+	if(list$name == libJson$sample_barcode){
+		sample_bc <- list$alias
+	}
+}
+
 
 if( params$is_comparison ){
     sample_stats <- "None"
@@ -227,7 +239,7 @@ plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "predicted.c
 
 
 ```{r vlnPlotUMIClusters, eval=seuratPlots}
-plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "umis") + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of UMIs") + labs(title = "Number of UMIs per Cluster")
+plotViolin(dat = clusterDat, groupVar = clusterColumn, datVar = "counts") + legend_theme + guide_opts_vln + labs(fill = "Cluster") + xlab("Cluster") + ylab("# of UMIs") + labs(title = "Number of UMIs per Cluster")
 ```
 
 ```{r vlnPlotGenesCluster, eval=seuratPlots}
@@ -279,12 +291,12 @@ plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "flags", ske
 plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "classification_2", sketched = is_sketch) + legend_theme + guide_opts_umap + labs(color = "Cell Finder Class.") + labs(title = "UMAP Colored by Cell Finder Classification")
 ```
 
-```{r umapRTbarcode}
-plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "RT_alias", sketched = is_sketch) + legend_theme + guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1), nrow = 32)) + labs(color = "RT Well") + labs(title = "UMAP Colored by RT Well")
+```{r umapBarcode}
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = sample_bc, sketched = is_sketch) + legend_theme + guides(color = guide_legend(override.aes = list(shape = 20, size = 1, alpha = 1), nrow = 32)) + labs(color = sample_bc) + labs(title = paste0("UMAP Colored by ", sample_bc))
 ```
 
 ```{r umapUmis}
-plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "umis", sketched = is_sketch) + legend_theme + labs(color = "# of UMIs") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number of UMIs")
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "counts", sketched = is_sketch) + legend_theme + labs(color = "# of UMIs") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number of UMIs")
 ```
 
 ```{r umapGenes}
@@ -292,15 +304,15 @@ plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "genes", ske
 ```
 
 ```{r umapReads}
-plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "reads", sketched = is_sketch) + legend_theme + labs(color = "# of Reads") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number Of Reads")
+plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "totalReads", sketched = is_sketch) + legend_theme + labs(color = "# of Reads") + scale_color_continuous(trans = "log", labels = scales::label_number(big.mark = ",")) + labs(title = "UMAP Colored by Number Of Reads")
 ```
 
 ```{r umapMitoReads}
 plotUMAP(dat = clusterDat, xVar = umap_X, yVar = umap_Y, colorVar = "mitoProp", sketched = is_sketch) + legend_theme + labs(color = "Mito. Prop.") + labs(title = "UMAP Colored by Proportion of Mitochondrial Reads") + scale_color_continuous(labels = scales::label_number(big.mark = ","))
 ``` 
 
-```{r stackedBarRT, eval=seuratPlots}
-plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = "RT_alias") + legend_theme + guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1), nrow = 32)) + labs(fill = "RT Well") + xlab("Cluster") + ylab("RT Well Proportion") + labs(title = "RT Well Proportion per Seurat Cluster")
+```{r stackedBarBC, eval=seuratPlots}
+plotStackedBar(dat = clusterDat, groupVar = clusterColumn, datVar = sample_bc) + legend_theme + guides(fill = guide_legend(override.aes = list(shape = 21, size = 1, alpha = 1), nrow = 32)) + labs(fill = sample_bc) + xlab("Cluster") + ylab(paste0(sample_bc, " Proportion")) + labs(title = paste0(sample_bc, " Proportion per Seurat Cluster"))
 ```
 
 ```{r stackedBarOutliers, eval=FALSE}

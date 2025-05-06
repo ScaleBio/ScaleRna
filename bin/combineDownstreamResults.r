@@ -27,7 +27,6 @@ readAllCellsData <- function(filePath){
     dat <- setnames(dat, old = 1, new = "cellBarcode")
     cellBarcodes <- paste0(dat[["cellBarcode"]], "_", dat[["sample"]])
     dat[["cellBarcode"]] <- cellBarcodes
-    dat <- dat[dat$pass == TRUE, ]
 
     return(dat)
 }

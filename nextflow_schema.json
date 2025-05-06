@@ -1,0 +1,606 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/ScaleRna/nextflow_schema.json",
+    "title": "ScaleRna pipeline parameters",
+    "description": "ScaleBio Seq Suite: RNA workflow",
+    "type": "object",
+    "$defs": {
+        "input_options": {
+            "title": "Input options",
+            "type": "object",
+            "description": "Input to the workflow",
+            "default": "",
+            "properties": {
+                "genome": {
+                    "type": "string",
+                    "description": "Reference genome related files and options required for the workflow",
+                    "fa_icon": "fas fa-keyboard",
+                    "pattern": "^\\S+\\.json$",
+                    "format": "file-path",
+                    "mimetype": "text/json"
+                },
+                "samples": {
+                    "type": "string",
+                    "description": "Csv file describing all samples in the analysis run (required!)",
+                    "fa_icon": "fas fa-keyboard",
+                    "pattern": "^\\S+\\.csv$",
+                    "format": "file-path",
+                    "mimetype": "text/csv"
+                },
+                "runFolder": {
+                    "type": "string",
+                    "description": "Top-level sequencer run directory (or null when using fastq input)",
+                    "fa_icon": "fas fa-keyboard",
+                    "format": "directory-path"
+                },
+                "fastqDir": {
+                    "type": "string",
+                    "description": "Directory containing pre-generated FASTQs files (or null when using runFolder input)",
+                    "fa_icon": "fas fa-keyboard",
+                    "format": "directory-path"
+                },
+                "fastqSamplesheet": {
+                    "type": "string",
+                    "description": "Optional samplesheet for bcl-convert, replacing the auto-generated one",
+                    "fa_icon": "fas fa-keyboard",
+                    "pattern": "^\\S+\\.csv$",
+                    "format": "file-path",
+                    "mimetype": "text/csv"
+                },
+                "resultDir": {
+                    "type": "string",
+                    "description": "For reporting runs; output directory for previous pipeline run (to combine multiple runs, specify in samples.csv)",
+                    "fa_icon": "fas fa-keyboard",
+                    "format": "directory-path"
+                }
+            },
+            "required": [
+                "genome",
+                "samples"
+            ],
+            "fa_icon": "fas fa-keyboard"
+        },
+        "analysis_options": {
+            "title": "Analysis options",
+            "type": "object",
+            "description": "Configure behavior of the workflow",
+            "default": "",
+            "properties": {
+                "libStructure": {
+                    "type": "string",
+                    "description": "Library structure (barcode locations and sequences). Can be absolute paths or relative to ${projectDir}/references/",
+                    "help_text": "RNA kit v1.0: \"libV1.json\"\nRNA kit v1.1: \"libV1.1.json\"\nQuantum kit: \"libQuantumV1.0.json\"",
+                    "fa_icon": "fas fa-filter",
+                    "pattern": "^\\S+\\.json$",
+                    "format": "file-path",
+                    "mimetype": "text/json"
+                },
+                "scalePlexLibStructure": {
+                    "type": "string",
+                    "default": "scaleplexlibQuantumV1.0.json",
+                    "description": "Library structure json to use for a ScalePlex run",
+                    "fa_icon": "fas fa-filter",
+                    "pattern": "^\\S+\\.json$",
+                    "format": "file-path",
+                    "mimetype": "text/json"
+                },
+                "scalePlex": {
+                    "type": "boolean",
+                    "description": "Analyze a ScalePlex dataset",
+                    "fa_icon": "fas fa-filter"
+                },
+                "quantum": {
+                    "type": "boolean",
+                    "description": "Analyze a QuantumScale dataset",
+                    "fa_icon": "fas fa-filter",
+                    "default": true
+                },
+                "reporting": {
+                    "type": "boolean",
+                    "description": "Run only cell-filtering and reporting steps, with optional sample merging",
+                    "fa_icon": "fas fa-filter"
+                },
+                "cellFinder": {
+                    "type": "boolean",
+                    "description": "Compare cell-barcode expression profiles to background to call more cells",
+                    "fa_icon": "fas fa-filter",
+                    "default": true
+                },
+                "merge": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Merge samples across libraries / plates (based on 'sample' or 'group' column in samples.csv)",
+                    "fa_icon": "fas fa-filter"
+                },
+                "bclConvertParams": {
+                    "type": "string",
+                    "description": "Additional bcl-convert arguments",
+                    "fa_icon": "fas fa-filter",
+                    "hidden": true
+                },
+                "fastqc": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Run fastqc on input fastqs",
+                    "fa_icon": "fas fa-filter",
+                    "hidden": true
+                },
+                "trimFastq": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "PolyA trimming with cutadapt",
+                    "fa_icon": "fas fa-filter",
+                    "hidden": true
+                },
+                "splitFastq": {
+                    "type": "boolean",
+                    "description": "Parallel analysis of subsets of reads",
+                    "fa_icon": "fas fa-filter",
+                    "hidden": true,
+                    "default": true
+                }
+            },
+            "required": [
+                "libStructure"
+            ],
+            "fa_icon": "fas fa-filter"
+        },
+        "output_options": {
+            "title": "Output options",
+            "type": "object",
+            "description": "Configure output options for a pipeline run",
+            "default": "",
+            "properties": {
+                "outDir": {
+                    "type": "string",
+                    "default": "ScaleRna.out",
+                    "description": "Name of the output directory for workflow results",
+                    "fa_icon": "fas fa-edit",
+                    "format": "directory-path"
+                },
+                "bamOut": {
+                    "type": "boolean",
+                    "description": "Set to false to skip BAM output from STAR",
+                    "fa_icon": "fas fa-edit"
+                },
+                "bcParserBamOut": {
+                    "type": "boolean",
+                    "description": "Set to true to publish unaligned BAMs from bcParser",
+                    "fa_icon": "fas fa-edit"
+                },
+                "fastqOut": {
+                    "type": "boolean",
+                    "description": "Set to true to publish bcl converted fastq files to outDir",
+                    "fa_icon": "fas fa-edit"
+                }
+            },
+            "required": [
+                "outDir"
+            ],
+            "fa_icon": "fas fa-edit"
+        },
+        "downstream_workflow": {
+            "title": "Downstream Workflow",
+            "type": "object",
+            "description": "Configure options for downstream workflow",
+            "default": "",
+            "properties": {
+                "azimuthRef": {
+                    "type": "string",
+                    "default": "pbmcref",
+                    "description": "Azimuth reference to use",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "azimuth": {
+                    "type": "boolean",
+                    "description": "Enable azimuth cell-type classification",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "seurat": {
+                    "type": "boolean",
+                    "description": "Enable preliminary seurat clustering",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "annData": {
+                    "type": "boolean",
+                    "description": "Enables output of UMI count matrices in annData format",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "compSamples": {
+                    "type": "boolean",
+                    "description": "Enable co-analysis of multiple samples",
+                    "fa_icon": "fas fa-chart-pie"
+                }
+            },
+            "fa_icon": "fas fa-chart-pie"
+        },
+        "internal_options": {
+            "title": "Internal options",
+            "type": "object",
+            "description": "Configure options for internal ScaleBio run",
+            "default": "",
+            "fa_icon": "fas fa-lock",
+            "properties": {
+                "internalReport": {
+                    "type": "boolean",
+                    "fa_icon": "fas fa-lock",
+                    "description": "Add extra metrics and plots to QC report",
+                    "hidden": true
+                },
+                "computeOutDir": {
+                    "type": "boolean",
+                    "fa_icon": "fas fa-lock",
+                    "description": "Construct unique output directory based on params.outDir and workflow run name",
+                    "hidden": true
+                },
+                "index2MinFileSize": {
+                    "type": "integer",
+                    "default": 1048576,
+                    "description": "Index2 fastq files below this size get filtered out",
+                    "hidden": true,
+                    "fa_icon": "fas fa-lock"
+                },
+                "minPassingSampleReads": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Minimum reads a sample must have post bcParser to make it to alignment",
+                    "hidden": true,
+                    "fa_icon": "fas fa-lock"
+                }
+            }
+        },
+        "resource_usage": {
+            "title": "Resource usage",
+            "type": "object",
+            "description": "Configure options that control resource usage and parallelization",
+            "default": "",
+            "properties": {
+                "bcParserJobsPerLibName": {
+                    "type": "integer",
+                    "default": 16,
+                    "description": "Number of bcParser jobs",
+                    "fa_icon": "fas fa-server",
+                    "hidden": true
+                },
+                "rtBarcodesPerStarJob": {
+                    "type": "integer",
+                    "default": 4,
+                    "description": "uBAM files from this number of RT barcodes make it into one STAR job when using splitFastq",
+                    "hidden": true,
+                    "fa_icon": "fas fa-server"
+                },
+                "totalFastqcJobs": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Number of total fastqc jobs",
+                    "hidden": true,
+                    "fa_icon": "fas fa-server"
+                },
+                "taskMaxMemory": {
+                    "type": "string",
+                    "default": "256 GB",
+                    "description": "Maximum memory that can be requested by a process",
+                    "fa_icon": "fas fa-server",
+                    "hidden": true
+                },
+                "taskMaxCpus": {
+                    "type": "integer",
+                    "default": 16,
+                    "description": "Maximum number of CPUs that can be requested by a process",
+                    "fa_icon": "fas fa-server",
+                    "hidden": true
+                },
+                "taskMaxTime": {
+                    "type": "string",
+                    "default": "2d",
+                    "description": "Maximum allowed running time of a single process",
+                    "fa_icon": "fas fa-server",
+                    "hidden": true
+                }
+            },
+            "fa_icon": "fas fa-server"
+        },
+        "trimming_cutadapt": {
+            "title": "Trimming (cutadapt)",
+            "type": "object",
+            "description": "Configure options for running cutadapt",
+            "default": "",
+            "properties": {
+                "trimAdapt3L": {
+                    "type": "string",
+                    "default": "-a A{8}N{100} -a T{8}N{100}",
+                    "description": "Adapters to trim with cutadapt; used with 3L data",
+                    "fa_icon": "fas fa-cut",
+                    "hidden": true
+                },
+                "trimAdaptQuantum": {
+                    "type": "string",
+                    "default": "-a A{8}N{100} -a G{12}N{100} -g TTGAGGTAGTGTGTCGGCAGCT -n 2",
+                    "description": "Adapters to trim with cutadapt. Used with QuantumScale data. The adapter sequence comes from the randomer adapter used in the Quantum workflow",
+                    "fa_icon": "fas fa-cut",
+                    "hidden": true
+                },
+                "trimAdaptQuantumScalePlex": {
+                    "type": "string",
+                    "default": "-a A{8}N{100} -a G{12}N{100} -g TTGAGGTAGTGTGTCGGCAGCT -g GGAGAAGAAGGAGGAGAGCA -n 3",
+                    "description": "Adapters to trim with cutadapt. Used with QuantumScale data when scalePlex is true",
+                    "fa_icon": "fas fa-cut",
+                    "hidden": true
+                }
+            },
+            "fa_icon": "fas fa-cut"
+        },
+        "star_alignment": {
+            "title": "Alignment (STAR)",
+            "type": "object",
+            "description": "Configure analysis options for alignment",
+            "default": "",
+            "help_text": "",
+            "properties": {
+                "starFeature": {
+                    "type": "string",
+                    "default": "GeneFull_Ex50pAS",
+                    "description": "What read to transcript overlaps STAR counts (--soloFeatures)",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "starMulti": {
+                    "type": "string",
+                    "default": "PropUnique",
+                    "description": "How to handle reads matching multiple genes (--soloMultiMappers)",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "starMultiBarnyard": {
+                    "type": "string",
+                    "default": "Unique",
+                    "description": "How to handle reads matching multiple genes for barnyard datasets (--soloMultiMappers)",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "starStrand": {
+                    "type": "string",
+                    "default": "Forward",
+                    "description": "Strandedness of RNA reads relative to annotated genes",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "starTrimming": {
+                    "type": "string",
+                    "description": "Trimming in STAR (in addition to cutadapt)",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "starMaxLoci": {
+                    "type": "integer",
+                    "default": 6,
+                    "description": "Maximum number of Loci multimapping reads can map (--outFilterMultimapNmax)",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                },
+                "roundCounts": {
+                    "type": "boolean",
+                    "description": "Round UMI counts to nearest integer",
+                    "fa_icon": "fas fa-indent",
+                    "hidden": true
+                }
+            },
+            "fa_icon": "fas fa-indent"
+        },
+        "scaleplex": {
+            "title": "ScalePlex",
+            "type": "object",
+            "description": "Configure analysis options for a ScalePlex run",
+            "default": "",
+            "properties": {
+                "scalePlexToRnaMapping": {
+                    "type": "string",
+                    "description": "ScalePlex PCR to RNA PCR mapping for merging ScalePlex library with RNA library",
+                    "fa_icon": "fas fa-viruses",
+                    "hidden": true
+                },
+                "scalePlexFCThreshold": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "If using fold-change assignment algorithm set fc ratio for valid assignment of second / third detected ScalePlex oligo",
+                    "fa_icon": "fas fa-viruses",
+                    "hidden": true
+                },
+                "scalePlexPercentFromTopTwo": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Threshold percent of ScalePlex UMIs from top two unique to pass assignment, e.g. 50",
+                    "fa_icon": "fas fa-viruses",
+                    "hidden": true
+                },
+                "scalePlexAssignmentMethod": {
+                    "type": "string",
+                    "default": "bg",
+                    "description": "Use background ('bg') or fold-change ('fc') algorithm for ScalePlex assignment",
+                    "fa_icon": "fas fa-viruses",
+                    "hidden": true,
+                    "enum": [
+                        "bg",
+                        "fc"
+                    ]
+                },
+                "scalePlexTrimAdapt": {
+                    "type": "string",
+                    "default": "-g GGAGAAGAAGGAGGAGGT -n 2",
+                    "description": "Trim ScalePlex oligo PCR handle sequence",
+                    "fa_icon": "fas fa-viruses",
+                    "hidden": true
+                },
+                "scalePlexMinReadUmi": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Minimum read count per UMI for inclusion in matrix",
+                    "hidden": true,
+                    "fa_icon": "fas fa-viruses"
+                }
+            },
+            "fa_icon": "fas fa-viruses"
+        },
+        "cell_calling_filtering_cells": {
+            "title": "Cell Calling/Filtering Cells",
+            "type": "object",
+            "description": "Set cell calling parameters and configure CellFinder behavior",
+            "default": "",
+            "properties": {
+                "expectedCells": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Optional input for TopCells or FixedCells; Typically set per sample in samples.csv",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "useSTARthreshold": {
+                    "type": "boolean",
+                    "description": "Use STARSolo built-in default cell threshold",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "minCellRatio": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Ratio between transcript counts of top cells and the lower cell threshold",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "topCellPercent": {
+                    "type": "integer",
+                    "default": 99,
+                    "fa_icon": "fas fa-fingerprint",
+                    "description": "Percentage of cells over minUTC to use as 'robust max'",
+                    "hidden": true
+                },
+                "madsReads": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "If set, flag cells with log(total_reads) outside +/- x MADs",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "madsPassingReads": {
+                    "type": "integer",
+                    "default": 8,
+                    "description": "Low passing read fraction: (passingReads/Reads) < x MADs",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "madsMito": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "# High mito. reads: (mitoReads/reads) > x MADs",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "filterOutliers": {
+                    "type": "boolean",
+                    "description": "Filter flagged cells from passing cell matrix",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "maxBeadBcs": {
+                    "type": "string",
+                    "default": "max",
+                    "description": "Can be \"max\" which will filter cells on beads where the number of passing cells equals the number of PBCs used in experiment. Or can be an integer which can be less than the number of PBCs in the experiment",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "fixedCells": {
+                    "type": "boolean",
+                    "description": "Call the top \"expectedCells\" many barcodes per sample as cells (set in samples.csv)",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "UTC": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Set a fixed threshold above which all barcodes are called (minUTC < X < UTC go to CellFinder if enabled)",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "minUTC": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Minimum transcript count to consider a barcode as a potential cell",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "filterBeads": {
+                    "type": "boolean",
+                    "description": "Flag used to filter cells from UMI count matrix which were captured on beads with a high number of passing cells",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "cellFinderFdr": {
+                    "type": "number",
+                    "default": 0.001,
+                    "description": "False Discovery Rate Threshold to call a cell-barcode above background",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                }
+            },
+            "fa_icon": "fas fa-fingerprint"
+        },
+        "ultima": {
+            "title": "Ultima",
+            "type": "object",
+            "description": "Configure options when analyzing ultima sequenced data",
+            "default": "",
+            "fa_icon": "fas fa-guitar",
+            "properties": {
+                "cramFilePattern": {
+                    "type": "string",
+                    "default": ".*-([^-_]+)_.*-.*-.*_(?<PBC>[^-_]+)",
+                    "fa_icon": "fas fa-guitar",
+                    "description": "Regex that determines naming pattern of input unaligned cram files",
+                    "hidden": true
+                },
+                "ultimaCramDir": {
+                    "type": "string",
+                    "fa_icon": "fas fa-guitar",
+                    "description": "Path to directory containing ultima unaligned cram files",
+                    "hidden": true,
+                    "format": "directory-path"
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "$ref": "#/$defs/input_options"
+        },
+        {
+            "$ref": "#/$defs/analysis_options"
+        },
+        {
+            "$ref": "#/$defs/output_options"
+        },
+        {
+            "$ref": "#/$defs/downstream_workflow"
+        },
+        {
+            "$ref": "#/$defs/internal_options"
+        },
+        {
+            "$ref": "#/$defs/resource_usage"
+        },
+        {
+            "$ref": "#/$defs/trimming_cutadapt"
+        },
+        {
+            "$ref": "#/$defs/star_alignment"
+        },
+        {
+            "$ref": "#/$defs/scaleplex"
+        },
+        {
+            "$ref": "#/$defs/cell_calling_filtering_cells"
+        },
+        {
+            "$ref": "#/$defs/ultima"
+        }
+    ]
+}

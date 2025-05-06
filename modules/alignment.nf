@@ -1,130 +1,169 @@
-// Run the STAR executable on demuxed fastq files
-process starsolo {
-input: 
+/*
+* Perform alignment of demultiplexed reads using STAR
+*
+* Processes:
+*     StarSolo
+*     MergeStar
+*/
+
+// Run the STAR executable on demuxed bam files
+process StarSolo {
+	tag "$sample ${task.index}"
+
+	// Outputs published under params.outDir/alignment/<sample>/<sample>.*
+	// BAM file is only published with --bamOut under params.outDir/alignment/aligned_bams if splitFastq true
+	// Otherwise under params.outDir/alignment/<sample>/<sample>.star.align
+	publishDir { file(params.outputDir) / starDir }, pattern: "Solo.out", mode: 'copy', saveAs: { "${outName}.star.solo" }, enabled: !params.splitFastq
+	publishDir { file(params.outputDir) / bamDir }, pattern: "*bam", mode: 'copy', saveAs: { "${outName}.bam" }, enabled: params.bamOut
+	publishDir { file(params.outputDir) / starDir / "${outName}.star.align" }, pattern: "Log*", mode: 'copy', enabled: !params.splitFastq
+
+	input: 
 	path(indexDir) // STAR genome index
-	val(library) // library.json (contains STAR barcode parameters)
-	tuple(val(sample), val(count), path("transcript*.fastq.gz"), path("barcode*.fastq.gz")) // transcript and BC fastq file
-output: 
+	tuple(val(sample), path(demuxed_ubam, name:"demuxed_ubam*.bam")) // bcParser output bam file
+	val(isBarnyard)
+
+	output: 
 	tuple(val(sample), path("Aligned.sortedByCoord.out.bam"), emit: bam, optional: true)
-	tuple(val(sample), path("Log.*"), emit: log)
+	tuple(val(sample), path("Log.final.out"), emit: log)
 	tuple(val(sample), path("Solo.out"), emit: solo)
 
-// If params.splitFastq is true we publish individual split outputs into params.outDir/alignment/<sample>/split/
-// with output filenames <sample>.<count>.*
-// Otherwise just params.outDir/alignment/<sample>/<sample>.*
-// BAM file is only published with --bamOut
-publishDir { outDir }, pattern: "Solo.out", mode: 'copy', saveAs: { "${outName}.star.solo" }
-publishDir { outDir / "${outName}.star.align" }, pattern: "*bam", mode: 'copy', saveAs: { "${outName}.bam" }, enabled: params.bamOut
-publishDir { outDir / "${outName}.star.align" }, pattern: "Log*", mode: 'copy'
-tag "$sample $count"
-script:
-	outDir = file(params.outDir) / "alignment" / sample
+	script:
+	starDir = "alignment/$sample"
 	outName = sample
+	bamDir = "alignment/${sample}/${sample}.star.align"
 	if (params.splitFastq) {
-		outDir = outDir / "split"
-		outName = "${sample}.${count}"
+		starDir += "/split"
+		outName = "${sample}.${task.index}"
+		bamDir += "/split_bams"
 	}
-	
-	barcodeParam = library["star_barcode_param"]
+	if (params.ultimaCramDir) {
+		strand = "Reverse"
+	} else {
+		strand = params.starStrand
+	}
 	if (params.bamOut) {
-		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS CR UR CB UB GX GN sS sQ sM gx gn --outSAMunmapped Within"
+		bamOpts = "--outSAMtype BAM SortedByCoordinate --outSAMattributes NH HI nM AS GX GN gx gn sF --outSAMunmapped Within"
     } else {
         bamOpts = "--outSAMtype None" 
     }
-"""
-	STAR --runThreadN $task.cpus --genomeDir $indexDir \
-	$barcodeParam ${params.starTrimming} \
-    $bamOpts --outSJtype None --soloCellReadStats Standard \
-	--soloStrand ${params.starStrand} --soloFeatures ${params.starFeature} --soloMultiMappers ${params.starMulti} \
-	--readFilesIn <(cat transcript*.fastq.gz) <(cat barcode*.fastq.gz) --readFilesCommand zcat
-"""
+	if(isBarnyard){
+		starMultiParam = params.starMultiBarnyard
+	} else {
+		starMultiParam = params.starMulti
+	}
+	matrixFn = Utils.starMatrixFn(starMultiParam)
+	ubam_files = demuxed_ubam.join(',')
+	"""
+	STAR --runThreadN $task.cpus --genomeDir $indexDir --soloType CB_UMI_Simple --soloBarcodeReadLength 0 --soloCBwhitelist None --soloCBtype String $bamOpts --outSJtype None\
+	--soloCellReadStats Standard --soloStrand $strand ${params.starTrimming} --soloFeatures ${params.starFeature} --soloMultiMappers $starMultiParam --readFilesIn $ubam_files\
+	--readFilesType SAM SE --readFilesCommand samtools view --soloInputSAMattrBarcodeSeq CB UM --soloCellFilter None --outFilterMultimapNmax ${params.starMaxLoci}
+	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/$matrixFn
+	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/barcodes.tsv
+	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/features.tsv
+	"""
 }
 
 // Concatinate raw STAR outputs for multiple sub-sample into a single merged raw STAR output
 // Run only when splitFastq is set to true
-process merge_star {
-input:
-    tuple(val(sample), path("Solo.out*"))
-output:
+process MergeStar {
+	tag "$sample"
+	label 'large'
+
+	publishDir file(params.outputDir) / "alignment", mode:'copy'
+	
+	input:
+    tuple(val(sample), path("Solo.out*"), path("log.final.out*"))
+	val(isBarnyard)
+
+	output:
     tuple(val(sample), path(outDir), emit: merge)
-label "report"
-tag "$sample"
-publishDir file(params.outDir) / "alignment", mode:'copy'
-script:
+	tuple(val(sample), path("$logOutDir/Log.final.out"), emit: merge_log)
+
+	script:
 	outDir = "${sample}/${sample}.star.solo"
-	matrixFn = Utils.starMatrixFn(params.starMulti)
-"""
-    mergeRawSTARoutput.py --star_dirs Solo.out* --star_feature $params.starFeature --star_matrix $matrixFn --out_dir $outDir
-"""
+	// To preserve original STAR output directory structure, we write the log file in the star.align directory
+	logOutDir = "${sample}/${sample}.star.align"
+	if(isBarnyard){
+		starMultiParam = params.starMultiBarnyard
+	} else {
+		starMultiParam = params.starMulti
+	}
+	matrixFn = Utils.starMatrixFn(starMultiParam)
+	"""
+    merge_raw_star_output.py --star_dirs Solo.out* --star_log log.final.out* --star_feature $params.starFeature --star_matrix $matrixFn --out_dir $outDir --log_out_dir $logOutDir
+	pigz -p $task.cpus $outDir/${params.starFeature}/raw/$matrixFn
+	"""
 }
 
 
-workflow alignment {
+workflow ALIGNMENT {
 take:
-	fastqs		// (sampleId, subsample, transcript, barcode)
-	libStructure // parsed library structure information
+	bams   // (sampleId, subsample, bam)
 	genome // Reference genome
 main:
-	// Sort the input fq files from inputReads to not break caching
-	fqsSorted = fastqs.toSortedList().flatMap()
-	fqsSorted.dump(tag:'fqsSorted')
+	
+	isBarnyard = genome.get('isBarnyard', false)
 
-	if (params.splitFastq) {
-		// Group all fastq files for one subsample
-		// alignFqGroupedBySampleAndWell -> (sampleID, subsample, [transcript], [barcode])
-		alignFqGroupedBySampleAndWell = fqsSorted.groupTuple(by:[0,1])
-
+	// Ultima files will always be split by sample barcode
+	if (params.splitFastq || params.ultimaCramDir) {
+		// Group all bam files for one subsample
+		// alignFqGroupedBySampleAndWell -> (sampleID, subsample, [bam])
+		alignFqGroupedBySampleAndWell = bams.groupTuple(by:[0,1], sort: true)
 		// Batch subsamples into groups for alignment
-		// alignFqJobGroups -> (sampleID, [[transcript]], [[barcode]])
-		alignFqJobGroups = alignFqGroupedBySampleAndWell.map {
-			def sample = it[0]
-			def transcript = it[2]
-			def barcode = it[3]
-			tuple(sample, transcript, barcode)
-		}.groupTuple(size:params.starGroupSize, remainder:true)
-		
-		// Flatten list of list of transcripts and barcodes
-		// alignFqGroups -> (sampleID, [transcript], [barcode])
-		alignFqJobGroups = alignFqJobGroups.map {
-			def sample = it[0]
-			def transcript = it[1].flatten()
-			def barcode = it[2].flatten()
-			tuple(sample, transcript, barcode)
-		}
+		// alignFqJobGroups -> (sampleID, [bam])
+		alignFqGroupedBySampleAndWell
+			// Sort channel so results are cached
+			.toSortedList { a, b ->
+				// Sort by id, subsample and then bam file names
+				def result = a[0] <=> b[0]
+				if (result == 0) {
+					result = a[1] <=> b[1]
+					if (result == 0) {
+						result = a[2].join(",") <=> b[2].join(",")
+					}
+				} 
+				return result
+			}
+			.flatMap()
+			// Drop subsample so that we can sort on bam files in subsequent groupTuple
+			.map{ id, _subsample, bam ->
+				[id, bam]
+			}
+			.groupTuple(size: params.rtBarcodesPerStarJob, sort: { a, b -> a.join(",") <=> b.join(",") }, remainder: true)
+			.map { id, bam ->
+				[id, bam.flatten()]
+			}
+			.set{ alignFqJobGroups }
 	} else {
-		// Group by sample name (sampleID, [transcript], [barcode])
-		alignFqJobGroups = fqsSorted.groupTuple().map { [it[0], it[2], it[3]]}
-	}
-
-	// Sort transcript and barcode files to ensure input to star is deterministic
-	alignFqJobGroups = alignFqJobGroups.map {
-		tuple(it[0], it[1].sort(), it[2].sort())
-	}
-	alignFqJobGroups = alignFqJobGroups.toSortedList().flatMap()	
-	// Add counter to alignFqJobGroups to aid output naming when splitFastq is true
-	def count = 1
-	alignFqJobGroups = alignFqJobGroups.map{
-		tuple(it[0], count++, it[1], it[2])
+		// Group by sample name (sampleID, [bam])
+		bams
+			.groupTuple()
+			.map { [it[0], it[2].flatten().sort()] }
+			.set{ alignFqJobGroups }
 	}
 	alignFqJobGroups.dump(tag:'alignFqJobGroups')
 	
-	starsolo(genome.star_index, libStructure, alignFqJobGroups)
-	starsolo.out.solo.dump(tag:'solo')
+	StarSolo(genome.star_index, alignFqJobGroups, isBarnyard)
+	StarSolo.out.solo.dump(tag:'solo')
 	
 	// If we split work, merge STAR results for subsamples together again
-	if (params.splitFastq) {
+	// Ultima files will always be split by sample barcode
+	if (params.splitFastq || params.ultimaCramDir) {
 		// Group on sample name to ensure star outputs of the same sample are grouped together
-		star_solo_by_sample = starsolo.out.solo.groupTuple()
+		star_solo_by_sample = StarSolo.out.solo.join(StarSolo.out.log).groupTuple()
 		star_solo_by_sample.dump(tag: 'star_solo_by_sample')
 		
 		// Merge star outputs
-		merge_star(star_solo_by_sample)
-		solo_out = merge_star.out.merge
+		MergeStar(star_solo_by_sample, isBarnyard)
+		solo_out = MergeStar.out.merge
+		solo_log = MergeStar.out.merge_log
 	} else {
-		solo_out = starsolo.out.solo
+		solo_out = StarSolo.out.solo
+		solo_log = StarSolo.out.log
 	}
 	solo_out.dump(tag:'soloOut')
 
 emit:
     soloOut = solo_out
+	soloLog = solo_log
 }

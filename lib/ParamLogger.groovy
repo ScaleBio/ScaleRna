@@ -1,4 +1,6 @@
 import nextflow.Nextflow
+import java.net.URI;
+
 
 // Adapted from nf-core/rnaseq
 class ParamLogger {
@@ -7,8 +9,37 @@ class ParamLogger {
             log.info("\nScaleBio Seq Suite: RNA Workflow\nFor usage information, please see README.md\n")
             System.exit(0)
         }
+        computeOutdir(workflow, params)
         log.info paramsSummaryLog(workflow, params)
         validateParams(params, log)
+    }
+
+    public static void computeOutdir(workflow, params) {
+        def uriOutDir
+        if (params.computeOutDir) {
+            // Add trailing slash before creating a URI so that is interpreted as a directory and not a file
+            // This is necessary for URI.resolve to work correctly
+            // If a trailing slash already exists, adding an extra one does not create an issue
+            uriOutDir = URI.create(params.outDir + "/")
+            if (params.runFolder) {
+                def uriRunFolderName = params.runFolder.tokenize("/").last()
+                params.outputDir = uriOutDir.resolve(uriRunFolderName+"/").resolve(workflow.runName+"/").toString()
+            }
+            if (params.fastqDir) {
+                def uriFastqDirName = params.fastqDir.tokenize("/").last()
+                params.outputDir = uriOutDir.resolve(uriFastqDirName+"/").resolve(workflow.runName+"/").toString()
+            }
+            if (params.reporting) {
+                def uriResultDirName = params.resultDir.tokenize("/").last()
+                params.outputDir = uriOutDir.resolve(uriResultDirName+"/").resolve(workflow.runName+"/").toString()
+            }
+            if (params.ultimaCramDir) {
+                def uriUltimaCramDirName = params.ultimaCramDir.tokenize("/").last()
+                params.outputDir = uriOutDir.resolve(uriUltimaCramDirName+"/").resolve(workflow.runName+"/").toString()
+            }
+        } else {
+            params.outputDir = params.outDir
+        }
     }
 
     public static String throwError(errMessage) {
@@ -39,16 +70,83 @@ class ParamLogger {
         // PLEASE ADD NEW PARAMETERS TO THE allowed_parameters LIST
         // useSTARthreshold is a special case because how nextflow resolves it to kebab case seems incorrect
         // use-starthreshold is the correct kebab case
-        def allowed_parameters = ['samples', 'genome', 'runFolder', 'fastqDir', 'fastqSamplesheet', 'reporting',
-                                  'resultDir', 'outDir', 'bamOut', 'fastqOut', 'libStructure', 'merge', 'splitFastq',
-                                  'bclConvertParams', 'fastqc', 'starFeature', 'starMulti', 'starStrand', 'trimFastq',
-                                  'trimAdapt', 'scalePlexTrimAdapt', 'starTrimming', 'minUTC', 'min-UTC', 'cellFinder', 'fixedCells', 'UTC',
-                                  'taskMaxMemory', 'taskMaxCpus', 'taskMaxTime', 'starGroupSize', 'bcParserJobs', 'seurat', 'azimuth',
-                                  'compSamples', 'internalReport', 'help',  'topCellPercent', 'minCellRatio', 'expectedCells',
-                                  'useSTARthreshold', 'use-STARthreshold', 'cellFinderFdr', 'filterOutliers', 'madsReads',
-                                  'madsPassingReads', 'madsMito', 'azimuthRef', 'cellTyping', 'seuratWorkflow', 'annData', 'scalePlex',
-                                  'scalePlexLibStructure', 'scalePlexAssignmentMethod', 'scalePlexPercentFromTopTwo', 'scalePlexFCThreshold',
-				  'scale-plex-FCThreshold']
+        def allowed_parameters = ['samples',
+                                  'genome',
+                                  'runFolder',
+                                  'fastqDir',
+                                  'fastqSamplesheet',
+                                  'reporting',
+                                  'bcParserBamOut',
+                                  'resultDir',
+                                  'outDir',
+                                  'bamOut',
+                                  'fastqOut',
+                                  'libStructure',
+                                  'merge',
+                                  'splitFastq',
+                                  'quantum',
+                                  'bclConvertParams',
+                                  'fastqc',
+                                  'starFeature',
+                                  'starMulti',
+                                  'starMultiBarnyard',
+                                  'starStrand',
+                                  'trimFastq',
+                                  'computeOutDir',
+                                  'trimAdapt',
+                                  'scalePlexTrimAdapt',
+                                  'starTrimming',
+                                  'minUTC',
+                                  'min-UTC',
+                                  'cellFinder',
+                                  'fixedCells',
+                                  'UTC',
+                                  'taskMaxMemory',
+                                  'taskMaxCpus',
+                                  'taskMaxTime',
+                                  'seurat',
+                                  'azimuth',
+                                  'scale-plex-FCThreshold',
+                                  'compSamples',
+                                  'internalReport',
+                                  'help', 
+                                  'topCellPercent',
+                                  'minCellRatio',
+                                  'expectedCells',
+                                  'useSTARthreshold',
+                                  'use-STARthreshold',
+                                  'cellFinderFdr',
+                                  'filterOutliers',
+                                  'madsReads',
+                                  'starMaxLoci',
+                                  'madsPassingReads',
+                                  'madsMito',
+                                  'azimuthRef',
+                                  'annData',
+                                  'scalePlex',
+                                  'scalePlexLibStructure',
+                                  'scalePlexAssignmentMethod',
+                                  'scalePlexPercentFromTopTwo',
+                                  'scalePlexFCThreshold',
+                                  'scalePlexMinReadUmi',
+                                  'trimAdapt3L',
+                                  'trim-adapt3L',
+                                  'trimAdaptQuantum',
+                                  'trimAdaptQuantumScalePlex',
+                                  'outputDir',
+                                  'starMultiBarnyard',
+                                  'starJobsPerSample',
+                                  'bcParserJobsPerLibName',
+                                  'ultimaCramDir',
+                                  'filterBeads',
+                                  'maxBeadBcs',
+                                  'scalePlexToRnaMapping',
+                                  'cramFilePattern',
+                                  'roundCounts',
+                                  'totalFastqcJobs',
+                                  'rtBarcodesPerStarJob',
+                                  'index2MinFileSize',
+                                  'minPassingSampleReads']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}
@@ -66,9 +164,9 @@ class ParamLogger {
         if (params.samples == null || params.samples == true) {
             throwError("Must specify --samples (e.g. samples.csv)")
         }
-	if (params.fastqDir && params.runFolder) {
-	    throwError("Cannot specify both --runFolder and --fastqDir")
-	}
+        if (params.fastqDir && params.runFolder) {
+            throwError("Cannot specify both --runFolder and --fastqDir")
+        }
         if (params.libStructure == null || params.libStructure == true) {
             throwError("Must specify --libStructure (e.g. libV1.1.json)")
         }
@@ -78,6 +176,11 @@ class ParamLogger {
         if (params.reporting) {
             if (params.runFolder || params.fastqDir) {
                 throwError("Cannot specify --runFolder or --fastqDir when running reporting-only (--reporting)")
+            }
+        }
+        if (params.quantum && params.scalePlex) {
+            if (params.scalePlexLibStructure == "scaleplexlibV1.json") {
+                throwError("Specify correct --scalePlexLibStructure (scaleplexlibQuantumV1.json) when running quantum data")
             }
         }
     }
@@ -101,7 +204,7 @@ class ParamLogger {
         nextflow_opts['Launch Directory'] = workflow.launchDir
         nextflow_opts['Work Directory'] = workflow.workDir
 
-        exec_opts['Workflow Output'] = params.outDir
+        exec_opts['Workflow Output'] = params.outputDir
         if (params.reporting) { exec_opts['reporting'] = params.reporting }
         exec_opts['merge'] = params.merge
         exec_opts['splitFastq'] = params.splitFastq
