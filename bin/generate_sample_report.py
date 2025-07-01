@@ -5,7 +5,6 @@ Generate the sample report (HTML and .csv) from per-sample metrics
 
 import argparse
 import datetime
-import json
 from pathlib import Path
 from typing import Dict
 import datapane as dp
@@ -18,6 +17,7 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from scale_utils import reporting
 from scale_utils.base_logger import logger
+from scale_utils.lib_json_parser import LibJsonParser
 import re
 
 
@@ -104,7 +104,6 @@ def build_sample_report(
     cellfinder: bool,
     lib_struct_json: Path,
     metadata: Dict[str, str],
-    starLog: Path,
     hash_metrics: Path = None,
     hash_stats: Path = None,
     hash_lib_name: str = None,
@@ -124,14 +123,12 @@ def build_sample_report(
         lib_struct_json: Library structure json (in directory with sequence files, etc.)
         trim_stats: json files containing cutadapt output
         metadata: Information about the sample and analysis run [FieldName -> Value]
-        starLog: Path to STAR log file
         hash_metrics: Path to hash metrics file
         hash_stats: Path to hash stats file
         hash_lib_name: Name of the hash library
         hash_all_cells: Path to hash all cells file
     """
-    lib_struct_dir = lib_struct_json.parent
-    lib_struct = json.load(open(lib_struct_json))
+    lib_json_obj = LibJsonParser(lib_struct_json)
 
     columns_to_select = [
         pl.col("pass"),
@@ -139,10 +136,12 @@ def build_sample_report(
         cs.ends_with("counts"),
         cs.matches("species"),
         pl.col("totalReads"),
-        pl.col("genes"),
+        cs.ends_with("genes"),
         pl.col("Saturation"),
     ]
-    if internal_report and any(["bead" in (bc.get("alias") or bc["name"]) for bc in lib_struct["barcodes"]]):
+    if internal_report and any(
+        ["bead" in (bc.get("alias") or bc["name"]) for bc in lib_json_obj.json_contents["barcodes"]]
+    ):
         columns_to_select.append(pl.col("bead_bc"))
     all_cells = pl.scan_parquet(sample_metrics / "allBarcodes.parquet").select(*columns_to_select).collect().to_pandas()
     passing_cells = pl.read_csv(sample_metrics / "allCells.csv").to_pandas().set_index("cell_id")
@@ -161,36 +160,27 @@ def build_sample_report(
         write_dir,
         internal_report,
         metadata,
-        starLog,
         is_barnyard,
         cellfinder,
     )
     pages.append(reads_page)
 
     all_index_plots, barcodes_page = build_barcodes_page(
-        lib_struct, lib_struct_dir, passing_cells, write_dir, sample_id, internal_report
+        lib_json_obj, passing_cells, write_dir, sample_id, internal_report
     )
     pages.append(barcodes_page)
 
     if internal_report:
         plate_plots = []
-        for bc in lib_struct["barcodes"]:
+        for bc in lib_json_obj.json_contents["barcodes"]:
             if bc.get("plate"):
                 plate_plots.append(all_index_plots[bc["name"]])
         dist_group = dp.Group(dp.Text("## Read Distributions"), dp.Group(blocks=internal_report_blocks, columns=2))
         plate_group = dp.Group(blocks=plate_plots, columns=1)
-        bead_bc_group = None
-        if "bead_bc" in all_cells.columns:
-            bead_rank_plot, bead_pass_hist = make_bead_plots(all_cells, write_dir, sample_id)
-            bead_bc_group = dp.Group(
-                dp.Text("## Bead BC"), dp.Group(blocks=[bead_rank_plot, bead_pass_hist], columns=2)
-            )
         internal_report_page = dp.Page(
             dp.Group(
                 dist_group,
                 plate_group,
-                # bead bc group not present in 3-level assay
-                bead_bc_group if bead_bc_group else dp.HTML("&nbsp;"),
                 columns=1,
             ),
             title="InternalReport",
@@ -209,33 +199,37 @@ def build_sample_report(
         pages.append(barnyard_page)
 
     if is_scale_plex:
-        hash_metrics_series = pd.read_csv(hash_metrics, header=None, index_col=0).squeeze(axis=1)
-        assigned_hashes = pd.read_csv(hash_stats, index_col=0)
-        hash_all_cells_df = (
-            pl.scan_parquet(hash_all_cells)
-            .select(
-                pl.col("pass"),
-                pl.col("counts"),
-                pl.col("totalReads"),
-                pl.col("Saturation"),
+        # Indicates that we have passing scaleplex reads for this library
+        if hash_stats:
+            hash_metrics_series = pd.read_csv(hash_metrics, header=None, index_col=0).squeeze(axis=1)
+            assigned_hashes = pd.read_csv(hash_stats, index_col=0)
+            hash_all_cells_df = (
+                pl.scan_parquet(hash_all_cells)
+                .select(
+                    pl.col("pass"),
+                    pl.col("counts"),
+                    pl.col("totalReads"),
+                    pl.col("Saturation"),
+                )
+                .collect()
+                .to_pandas()
             )
-            .collect()
-            .to_pandas()
-        )
-        hash_passing_cells = (
-            pl.scan_parquet(hash_all_cells)
-            .filter(pl.col("pass"))
-            .select(
-                pl.col("topTwo"),
-                pl.col("assigned_scaleplex"),
+            hash_passing_cells = (
+                pl.scan_parquet(hash_all_cells)
+                .filter(pl.col("pass"))
+                .select(
+                    pl.col("topTwo"),
+                    pl.col("assigned_scaleplex"),
+                )
+                .collect()
+                .to_pandas()
             )
-            .collect()
-            .to_pandas()
-        )
-        scale_plex_page, scale_plex_stats = build_scale_plex_page(
-            hash_lib_name, hash_metrics_series, assigned_hashes, hash_all_cells_df, hash_passing_cells
-        )
-        report_stats = pd.concat([report_stats, scale_plex_stats])
+            scale_plex_page, scale_plex_stats = build_scale_plex_page(
+                hash_lib_name, hash_metrics_series, assigned_hashes, hash_all_cells_df, hash_passing_cells
+            )
+            report_stats = pd.concat([report_stats, scale_plex_stats])
+        else:
+            scale_plex_page = dp.Page(dp.Text("Library has no passing ScalePlex reads"), title="ScalePlex")
         pages.append(scale_plex_page)
 
     report = dp.Report(blocks=pages)
@@ -254,72 +248,17 @@ def build_sample_report(
     report.save(write_dir / f"{sample_id}.report.html")
 
 
-def parse_star_log(starLog: Path) -> list[Metric]:
-    """
-    Parse star log file and return list of Metric objects
-
-    Args:
-        starLog: Path to STAR final log file
-    """
-    stats_obj = []
-    with open(starLog) as f:
-        for line in f:
-            if "Average input read length" in line:
-                stats_obj.append(
-                    Metric(
-                        "Reads",
-                        "Average Trimmed Read Length",
-                        "Average input read length",
-                        float(line.split("Average input read length |")[1].strip()),
-                        ".0f",
-                    )
-                )
-            if "Average mapped length" in line:
-                stats_obj.append(
-                    Metric(
-                        "Reads",
-                        "Average Mapped Length",
-                        "Average mapped length",
-                        float(line.split("Average mapped length |")[1].strip()),
-                        ".1f",
-                    )
-                )
-            if "Mismatch rate per base, % |" in line:
-                stats_obj.append(
-                    Metric(
-                        "Reads",
-                        "Mapped Mismatch Rate(%)",
-                        "Mismatch rate per base, %",
-                        float(line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]),
-                        ".2f",
-                    )
-                )
-            if "% of reads mapped to too many loci |" in line:
-                stats_obj.append(
-                    Metric(
-                        "Reads",
-                        "Mapped to Too Many Loci(%)",
-                        "% of reads mapped to too many loci",
-                        float(line.split("% of reads mapped to too many loci |")[1].strip().split("%")[0]),
-                        ".1f",
-                    )
-                )
-    return stats_obj
-
-
-def get_read_metrics(sample_stats: pd.DataFrame, starLog: Path) -> list[Metric]:
+def get_read_metrics(sample_stats: pd.DataFrame) -> list[Metric]:
     """
     Make list of Metric objects depicting read stats that will be displayed in the sample report
 
     Args:
         sample_stats: Sample-level statistics
-        starLog: Path to STAR final log file
     """
-    star_metrics_obj = parse_star_log(starLog)
-    for star_metric in star_metrics_obj:
-        if star_metric.col_name == "% of reads mapped to too many loci":
-            # Need to divide by 100 because the raw value is a percentage
-            mapped_reads_perc = (star_metric.raw_value / 100) + sample_stats.loc[("Reads", "mapped_reads_perc")].Value
+    # Need to divide by 100 because the raw value is a percentage
+    mapped_reads_perc = (sample_stats.loc[("Reads", "mapped_to_too_many_loci_perc")].Value / 100) + sample_stats.loc[
+        ("Reads", "mapped_reads_perc")
+    ].Value
     stats_obj = []
     if ("Reads", "total_sample_reads_post_barcode_demux") in sample_stats.index:
         stats_obj.append(
@@ -347,7 +286,7 @@ def get_read_metrics(sample_stats: pd.DataFrame, starLog: Path) -> list[Metric]:
                 "Reads",
                 "Passing Read Alignments",
                 "passing_aligns_perc",
-                1 - (star_metrics_obj[3].raw_value / 100), # 3 indicates the mapped to too many loci metric percentage
+                1 - (sample_stats.loc[("Reads", "mapped_to_too_many_loci_perc")].Value / 100),
                 ".1%",
             ),
             Metric(
@@ -375,10 +314,29 @@ def get_read_metrics(sample_stats: pd.DataFrame, starLog: Path) -> list[Metric]:
                 ".1%",
             ),
             Metric("Reads", "Saturation", "saturation", sample_stats.loc[("Reads", "saturation")].Value, ".2f"),
+            Metric(
+                "Reads",
+                "Average Trimmed Read Length",
+                "avg_trimmed_read_len",
+                sample_stats.loc[("Reads", "avg_trimmed_read_len")].Value,
+                ".0f",
+            ),
+            Metric(
+                "Reads",
+                "Average Mapped Length",
+                "avg_mapped_len",
+                sample_stats.loc[("Reads", "avg_mapped_len")].Value,
+                ".1f",
+            ),
+            Metric(
+                "Reads",
+                "Mapped Mismatch Rate(%)",
+                "mismatch_rate_per_base_perc",
+                sample_stats.loc[("Reads", "mismatch_rate_per_base_perc")].Value,
+                ".2f",
+            ),
         ]
     )
-    # Ignore the last element of star_metrics_obj because that is the mapped to too many loci, which we report as a different metric
-    stats_obj.extend(star_metrics_obj[:-1])
     return stats_obj
 
 
@@ -390,7 +348,6 @@ def build_reads_page(
     write_dir: Path,
     internal_report: bool,
     metadata: Dict[str, str],
-    starLog: Path,
     is_barnyard: bool,
     cellfinder: bool,
 ):
@@ -406,7 +363,6 @@ def build_reads_page(
         internal_report: Flag indicating whether report is to be
             generated for internal r&d run
         metadata: Information about the sample and analysis run [FieldName -> Value]
-        starLog: Path to STAR final log file
         is_barnyard: Flag indicating whether barnyard analysis was performed
         cellfinder: Flag indicating whether cellfinder was used for cell calling
 
@@ -416,7 +372,7 @@ def build_reads_page(
     """
     report_stats = pd.DataFrame({"Category": ["Sample"], "Metric": ["SampleName"], "Value": [sample]})
     metrics_obj = Metric("Sample", "SampleName", "SampleName", sample)
-    read_metrics_obj = get_read_metrics(sample_stats, starLog)
+    read_metrics_obj = get_read_metrics(sample_stats)
     cell_metrics_obj = get_cell_metrics(sample_stats, is_barnyard)
     complexity_metrics_obj = get_complexity_metrics(sample_stats)
     all_metrics = [metrics_obj]
@@ -459,10 +415,8 @@ def build_reads_page(
         genes_counts_scatter,
         saturation_scatter,
     ]
-    # If reads_per_cell does not exist in sample_stats, it is a reporting run and we skip this plot
-    if ("Cells", "reads_per_cell") in sample_stats.index:
-        unique_reads_fig = make_unique_reads_fig(sample_stats)
-        group_blocks.insert(4, unique_reads_fig)
+    unique_reads_fig = make_unique_reads_fig(sample_stats)
+    group_blocks.insert(4, unique_reads_fig)
     page = dp.Page(dp.Group(blocks=group_blocks, columns=2), title="Summary")
 
     internal_report_blocks = []
@@ -488,8 +442,7 @@ def build_reads_page(
 
 
 def build_barcodes_page(
-    lib_struct: dict[str, str],
-    lib_struct_dir: Path,
+    lib_json_obj: LibJsonParser,
     passing_cells: pd.DataFrame,
     write_dir: Path,
     sample_id: str,
@@ -499,8 +452,7 @@ def build_barcodes_page(
     Build datapane page for barcodes
 
     Args:
-        lib_struct: Library structure definition
-        lib_struct_dir: Directory with barcode sequences ec.
+        lib_json_obj: Object containing library structure information
         passing_cells: Metrics per passing cell-barcode
         write_dir: Ouput directory
         sample_id: Unique ID of this sample
@@ -512,12 +464,11 @@ def build_barcodes_page(
     """
     blocks_to_render = []
     all_index_plots = {}
-    for bc in lib_struct["barcodes"]:
+    for bc in lib_json_obj.json_contents["barcodes"]:
         if bc.get("plate"):
             alias = bc.get("alias") or bc["name"]
             index_plots = reporting.barcodeLevelPlots(
-                lib_struct,
-                lib_struct_dir,
+                lib_json_obj,
                 sample_id,
                 passing_cells,
                 alias,
@@ -526,7 +477,7 @@ def build_barcodes_page(
                 write_dir,
             )
             all_index_plots[bc["name"]] = index_plots
-    blocks_to_render.append(all_index_plots[lib_struct["sample_barcode"]])
+    blocks_to_render.append(all_index_plots[lib_json_obj.json_contents["sample_barcode"]])
 
     return all_index_plots, dp.Page(blocks=blocks_to_render, title="Barcodes")
 
@@ -741,10 +692,15 @@ def build_gene_read_scatter(all_cells: pd.DataFrame) -> dp.Plot:
         Plot object with the figure
     """
     all_cells["plt_color"] = all_cells["pass"].map({True: "Cell", False: "Background"})
+    if "mouse_genes" in all_cells.columns:
+        # for barnyard data don't use sum of genes across species but max species
+        all_cells["totalGenes"] = all_cells[["mouse_genes", "human_genes"]].max(axis=1)
+    else:
+        all_cells["totalGenes"] = all_cells["genes"]
     fig = px.scatter(
         subsample_all_cells(all_cells),
         x="totalReads",
-        y="genes",
+        y="totalGenes",
         color="plt_color",
         color_discrete_map=reporting.SCATTER_COLORMAP,
         template=reporting.DEFAULT_FIGURE_STYLE,
@@ -797,79 +753,6 @@ def build_saturation_scatter(all_cells: pd.DataFrame) -> dp.Plot:
     )
     fig = Figure(data=fig_bg.data + fig_pass.data, layout=fig_bg.layout)
     return dp.Plot(fig)
-
-
-def make_bead_plots(all_cells: pd.DataFrame, write_dir: Path, sample_id: str) -> dp.Plot:
-    """Make bead rank plot and histogram of number of passing cells per bead
-
-    Args:
-        all_cells: Cell-barcode-level metrics
-        write_dir: Output directory
-        sample_id: Unique ID of this sample
-
-    Returns:
-        Plot to include on internal report tab
-    """
-    bead_df = all_cells[["bead_bc", "pass", "counts"]].groupby("bead_bc").sum()
-    bead_df = bead_df.sort_values("counts", ignore_index=True, ascending=False)
-    indices = reporting.sparseLogCoords(bead_df.index.size)
-    fig = px.scatter(
-        bead_df.iloc[indices],
-        x=indices,
-        y="counts",
-        labels={"x": "Bead barcodes", "counts": "Unique transcript counts"},
-        log_x=True,
-        log_y=True,
-        template=reporting.DEFAULT_FIGURE_STYLE,
-        title="Bead Rank Plot",
-        opacity=0.5,
-    )
-    if indices.size > 0:
-        fig.update_layout(xaxis_range=[1, np.log10(max(indices) + 1)])
-    save_figure_png(write_dir, sample_id, fig, "BeadRankPlot.png")
-    bead_rank_plot = dp.Plot(fig)
-
-    bead_df = bead_df[bead_df["counts"] > 100]
-    # calculate histogram with matplotlib
-    counts, bins, _ = plt.hist(bead_df["pass"], bins=range(bead_df["pass"].max() + 2))
-
-    yaxis_title = "Number of beads"
-
-    # plot as bar chart in plotly so raw dataset is not saved to HTML report
-    fig = px.bar(
-        x=bins[:-1],
-        y=counts,
-        text_auto=True,
-        title="Number of Passing Cells per Bead<br><sup>Beads with <= 100 counts are excluded</sup>",
-        template=reporting.DEFAULT_FIGURE_STYLE,
-        labels={"x": "Number of passing cells", "y": yaxis_title},
-    )
-    fig.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
-    # add annotation with total number of beads
-    fig.add_annotation(
-        xref="x domain",
-        yref="y domain",
-        x=0.95,
-        y=0.90,
-        showarrow=False,
-        font=dict(size=16, color="#ffffff"),
-        align="center",
-        bordercolor="#B2B5BB",
-        borderwidth=2,
-        borderpad=4,
-        bgcolor="#278BB0",
-        opacity=0.8,
-        text=f"{bead_df.shape[0]:,} total beads<br><sup>> 100 counts</sup>",
-    )
-
-    fig.update_layout(
-        yaxis_title=yaxis_title,
-        bargap=0.1,
-    )
-    save_figure_png(write_dir, sample_id, fig, "BeadPassHist.png")
-    bead_pass_hist = dp.Plot(fig)
-
-    return bead_rank_plot, bead_pass_hist
 
 
 def make_rank_plot(
@@ -1056,10 +939,10 @@ def make_barnyard_stats(passing_cells: pd.DataFrame) -> list[Metric]:
     human_bg = passing_barnyard_cells[
         (passing_barnyard_cells.species != "Mixed") & (passing_barnyard_cells.species != "Mouse")
     ].minor_frac.median()
-    human_counts_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].counts.median()
-    mouse_counts_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Mouse")].counts.median()
-    human_genes_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].genes.median()
-    mouse_genes_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Mouse")].genes.median()
+    human_counts_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].human_counts.median()
+    mouse_counts_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Mouse")].mouse_counts.median()
+    human_genes_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].human_genes.median()
+    mouse_genes_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Mouse")].mouse_genes.median()
     human_reads_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].totalReads.median()
     mouse_reads_med = passing_barnyard_cells[(passing_barnyard_cells.species == "Mouse")].totalReads.median()
     human_saturation = passing_barnyard_cells[(passing_barnyard_cells.species == "Human")].Saturation.median()
@@ -1111,12 +994,15 @@ def make_unique_reads_fig(sample_stats: pd.DataFrame) -> dp.Plot:
 
     plot_df = pd.DataFrame.from_records(target_mean_reads, columns=["x", "unique_read"])
     plot_df.sort_values(by="x", inplace=True)
-
+    if ("Reads", "total_sample_reads_post_barcode_demux") in sample_stats.index:
+        x_axis_label = "Total reads per cell"
+    else:
+        x_axis_label = "Passing reads per cell"
     fig = px.line(
         plot_df,
         x="x",
         y="unique_read",
-        labels={"x": "Total reads per cell", "unique_read": "Median unique transcript counts (extrapolated)"},
+        labels={"x": x_axis_label, "unique_read": "Median unique transcript counts (extrapolated)"},
         template=reporting.DEFAULT_FIGURE_STYLE,
         markers=True,
         title="Complexity",
@@ -1230,7 +1116,6 @@ def main():
     parser.add_argument("--sampleName", help="Metadata for report")
     parser.add_argument("--libName", default="NA", help="Metadata for report")
     parser.add_argument("--barcodes", default="NA", help="Metadata for report")
-    parser.add_argument("--starLog", required=True, type=Path, help="STAR log file")
     parser.add_argument("--addOutDir", help="Add output directory path to report")
     parser.add_argument("--workflowVersion", default="NA", help="Metadata for report")
     args = parser.parse_args()
@@ -1259,7 +1144,6 @@ def main():
         cellfinder=args.cellFinder,
         lib_struct_json=args.libraryStruct,
         metadata=metadata,
-        starLog=args.starLog,
         hash_metrics=args.scalePlexMetrics,
         hash_stats=args.scalePlexStats,
         hash_lib_name=args.scalePlexLibName,

@@ -12,6 +12,7 @@ import pandas as pd
 import json
 from scipy.sparse import csr_matrix
 from scipy.io import mmwrite
+from scale_utils.lib_json_parser import LibJsonParser
 import pysam
 
 # Positive matches in bcParser output
@@ -84,9 +85,9 @@ def get_scaleplex_to_rna_mapping(fname: Path) -> dict[str, str]:
 def preprocessJson(libStructJson: Path, mapping_file: Path):
     """read in libstruct json and parse barcode levels for generation of cell barcode tuple
     and the whitelist used for detection"""
-    libStruct = json.load(open(libStructJson))
+    lib_json_obj = LibJsonParser(libStructJson)
     aliases_list = list()
-    for bc in libStruct["barcodes"]:
+    for bc in lib_json_obj.json_contents["barcodes"]:
         if bc.get("type") not in ["library_index", "umi", "target"]:
             aliases_list.append(bc.get("alias"))
         if bc.get("name") in ["scaleplex"]:

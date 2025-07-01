@@ -15,5 +15,7 @@
     "index2Seqs": "3lvlRNA_pcr.txt",
     "index2RevComp": true,
     "split_on": "index2"
-}
+},
+"quantum": false,
+"trimAdapter": "-a A{8}N{100} -a T{8}N{100}"
 }

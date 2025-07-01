@@ -1,8 +1,6 @@
 name: anndata
 channels:
   - conda-forge
-  - https://repo.anaconda.com/pkgs/main
-  - https://repo.anaconda.com/pkgs/r
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
@@ -14,7 +12,7 @@ dependencies:
   - cached-property=1.5.2=hd8ed1ab_1
   - cached_property=1.5.2=pyha770c72_1
   - exceptiongroup=1.2.2=pyhd8ed1ab_1
-  - h5py=3.12.1=nompi_py39h394ba53_103
+  - h5py=3.12.1=nompi_py313h8a9c7c3_103
   - hdf5=1.14.4=nompi_h2d575fe_105
   - keyutils=1.6.1=h166bdaf_0
   - krb5=1.21.3=h659f571_0
@@ -25,42 +23,39 @@ dependencies:
   - libcurl=8.13.0=h332b0f4_0
   - libedit=3.1.20250104=pl5321h7949ede_0
   - libev=4.33=hd590300_2
+  - libexpat=2.7.0=h5888daf_0
   - libffi=3.4.6=h2dba641_1
   - libgcc=14.2.0=h767d61c_2
   - libgcc-ng=14.2.0=h69a702a_2
   - libgfortran=14.2.0=h69a702a_2
-  - libgfortran-ng=14.2.0=h69a702a_2
   - libgfortran5=14.2.0=hf1ad2bd_2
   - libgomp=14.2.0=h767d61c_2
   - liblapack=3.9.0=31_h7ac8fdf_openblas
   - liblzma=5.8.1=hb9d3cd8_0
+  - libmpdec=4.0.0=h4bc722e_0
   - libnghttp2=1.64.0=h161d5f1_0
-  - libnsl=2.0.1=hd590300_0
   - libopenblas=0.3.29=pthreads_h94d23a6_0
   - libsqlite=3.49.1=hee588c1_2
   - libssh2=1.11.1=hf672d98_0
   - libstdcxx=14.2.0=h8f9b012_2
   - libstdcxx-ng=14.2.0=h4852527_2
   - libuuid=2.38.1=h0b41bf4_0
-  - libxcrypt=4.4.36=hd590300_1
   - libzlib=1.3.1=hb9d3cd8_2
   - natsort=8.4.0=pyh29332c3_1
   - ncurses=6.5=h2d0b736_3
-  - numpy=2.0.2=py39h9cb892a_1
+  - numpy=2.2.4=py313h17eae1a_0
   - openssl=3.5.0=h7b32b05_0
   - packaging=24.2=pyhd8ed1ab_2
-  - pandas=2.2.3=py39h3b40f6f_2
-  - pip=25.0.1=pyh8b19718_0
-  - python=3.9.22=h85ef794_0_cpython
+  - pandas=2.2.3=py313ha87cce1_3
+  - pip=25.0.1=pyh145f28c_0
+  - python=3.13.3=hf636f53_101_cp313
   - python-dateutil=2.9.0.post0=pyhff2d567_1
   - python-tzdata=2025.2=pyhd8ed1ab_0
-  - python_abi=3.9=6_cp39
-  - pytz=2024.1=pyhd8ed1ab_0
+  - python_abi=3.13=6_cp313
+  - pytz=2025.2=pyhd8ed1ab_0
   - readline=8.2=h8c095d6_2
-  - scipy=1.13.1=py39haf93ffa_0
-  - setuptools=78.1.0=pyhff2d567_0
+  - scipy=1.14.1=py313h27c5614_2
   - six=1.17.0=pyhd8ed1ab_0
   - tk=8.6.13=noxft_h4845f30_101
   - tzdata=2025b=h78e105d_0
-  - wheel=0.45.1=pyhd8ed1ab_1
   - zstd=1.5.7=hb8e6e7a_2

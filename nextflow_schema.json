@@ -73,7 +73,8 @@
                     "fa_icon": "fas fa-filter",
                     "pattern": "^\\S+\\.json$",
                     "format": "file-path",
-                    "mimetype": "text/json"
+                    "mimetype": "text/json",
+                    "default": "libQuantumV1.0.json"
                 },
                 "scalePlexLibStructure": {
                     "type": "string",
@@ -88,12 +89,6 @@
                     "type": "boolean",
                     "description": "Analyze a ScalePlex dataset",
                     "fa_icon": "fas fa-filter"
-                },
-                "quantum": {
-                    "type": "boolean",
-                    "description": "Analyze a QuantumScale dataset",
-                    "fa_icon": "fas fa-filter",
-                    "default": true
                 },
                 "reporting": {
                     "type": "boolean",
@@ -122,13 +117,6 @@
                     "type": "boolean",
                     "default": true,
                     "description": "Run fastqc on input fastqs",
-                    "fa_icon": "fas fa-filter",
-                    "hidden": true
-                },
-                "trimFastq": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "PolyA trimming with cutadapt",
                     "fa_icon": "fas fa-filter",
                     "hidden": true
                 },
@@ -242,7 +230,7 @@
                 },
                 "minPassingSampleReads": {
                     "type": "integer",
-                    "default": 1000,
+                    "default": 100000,
                     "description": "Minimum reads a sample must have post bcParser to make it to alignment",
                     "hidden": true,
                     "fa_icon": "fas fa-lock"
@@ -276,6 +264,12 @@
                     "hidden": true,
                     "fa_icon": "fas fa-server"
                 },
+                "filesPerLibDetection": {
+                    "type": "integer",
+                    "default": 32,
+                    "fa_icon": "fas fa-server",
+                    "description": "Number of files (input index2 fastq / input ucram) batched into a single LibraryDetection process"
+                },
                 "taskMaxMemory": {
                     "type": "string",
                     "default": "256 GB",
@@ -299,36 +293,6 @@
                 }
             },
             "fa_icon": "fas fa-server"
-        },
-        "trimming_cutadapt": {
-            "title": "Trimming (cutadapt)",
-            "type": "object",
-            "description": "Configure options for running cutadapt",
-            "default": "",
-            "properties": {
-                "trimAdapt3L": {
-                    "type": "string",
-                    "default": "-a A{8}N{100} -a T{8}N{100}",
-                    "description": "Adapters to trim with cutadapt; used with 3L data",
-                    "fa_icon": "fas fa-cut",
-                    "hidden": true
-                },
-                "trimAdaptQuantum": {
-                    "type": "string",
-                    "default": "-a A{8}N{100} -a G{12}N{100} -g TTGAGGTAGTGTGTCGGCAGCT -n 2",
-                    "description": "Adapters to trim with cutadapt. Used with QuantumScale data. The adapter sequence comes from the randomer adapter used in the Quantum workflow",
-                    "fa_icon": "fas fa-cut",
-                    "hidden": true
-                },
-                "trimAdaptQuantumScalePlex": {
-                    "type": "string",
-                    "default": "-a A{8}N{100} -a G{12}N{100} -g TTGAGGTAGTGTGTCGGCAGCT -g GGAGAAGAAGGAGGAGAGCA -n 3",
-                    "description": "Adapters to trim with cutadapt. Used with QuantumScale data when scalePlex is true",
-                    "fa_icon": "fas fa-cut",
-                    "hidden": true
-                }
-            },
-            "fa_icon": "fas fa-cut"
         },
         "star_alignment": {
             "title": "Alignment (STAR)",
@@ -424,17 +388,24 @@
                         "fc"
                     ]
                 },
-                "scalePlexTrimAdapt": {
-                    "type": "string",
-                    "default": "-g GGAGAAGAAGGAGGAGGT -n 2",
-                    "description": "Trim ScalePlex oligo PCR handle sequence",
-                    "fa_icon": "fas fa-viruses",
-                    "hidden": true
-                },
                 "scalePlexMinReadUmi": {
                     "type": "integer",
                     "default": 1,
                     "description": "Minimum read count per UMI for inclusion in matrix",
+                    "hidden": true,
+                    "fa_icon": "fas fa-viruses"
+                },
+                "scalePlexMinCellCountBG": {
+                    "type": "number",
+                    "default": 0.01,
+                    "description": "Minimum fraction of cells that an ScalePlex oligo needs background UMI counts in to be considered as valid",
+                    "hidden": true,
+                    "fa_icon": "fas fa-viruses"
+                },
+                "scalePlexMinBGVal": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "Minimum value of ScalePlex oligo counts set in background estimation if a ScalePlex oligo does not meet scalePlexMinCellCountBG check",
                     "hidden": true,
                     "fa_icon": "fas fa-viruses"
                 }
@@ -501,10 +472,10 @@
                     "fa_icon": "fas fa-fingerprint",
                     "hidden": true
                 },
-                "maxBeadBcs": {
-                    "type": "string",
-                    "default": "max",
-                    "description": "Can be \"max\" which will filter cells on beads where the number of passing cells equals the number of PBCs used in experiment. Or can be an integer which can be less than the number of PBCs in the experiment",
+                "minBeadDivergence": {
+                    "type": "number",
+                    "default": 0.2,
+                    "description": "Classify beads as ambient with KL divergence below this threshold",
                     "fa_icon": "fas fa-fingerprint",
                     "hidden": true
                 },
@@ -528,9 +499,9 @@
                     "fa_icon": "fas fa-fingerprint",
                     "hidden": true
                 },
-                "filterBeads": {
+                "filterAmbientBeads": {
                     "type": "boolean",
-                    "description": "Flag used to filter cells from UMI count matrix which were captured on beads with a high number of passing cells",
+                    "description": "Flag used to filter cells from UMI count matrix which were captured on ambient beads",
                     "fa_icon": "fas fa-fingerprint",
                     "hidden": true
                 },
@@ -538,6 +509,13 @@
                     "type": "number",
                     "default": 0.001,
                     "description": "False Discovery Rate Threshold to call a cell-barcode above background",
+                    "fa_icon": "fas fa-fingerprint",
+                    "hidden": true
+                },
+                "medianFraction": {
+                    "type": "number",
+                    "default": 0.05,
+                    "description": "Lower count threshold for barcodes to be tested relative to 'top cells'; 0 to disable",
                     "fa_icon": "fas fa-fingerprint",
                     "hidden": true
                 }
@@ -551,13 +529,6 @@
             "default": "",
             "fa_icon": "fas fa-guitar",
             "properties": {
-                "cramFilePattern": {
-                    "type": "string",
-                    "default": ".*-([^-_]+)_.*-.*-.*_(?<PBC>[^-_]+)",
-                    "fa_icon": "fas fa-guitar",
-                    "description": "Regex that determines naming pattern of input unaligned cram files",
-                    "hidden": true
-                },
                 "ultimaCramDir": {
                     "type": "string",
                     "fa_icon": "fas fa-guitar",
@@ -586,9 +557,6 @@
         },
         {
             "$ref": "#/$defs/resource_usage"
-        },
-        {
-            "$ref": "#/$defs/trimming_cutadapt"
         },
         {
             "$ref": "#/$defs/star_alignment"

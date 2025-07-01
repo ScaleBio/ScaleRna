@@ -6,8 +6,7 @@ The file called _library\_{libIndex2}.report.html_ contains the summary report a
 ### Read Status
 This table gives the barcode matching statistics for the full library. Reads that fail barcode matching are not assigned to any sample.
  
-**Barcode Pass**: Reads for which all expected barcodes were found \
-**Too Short Error**: Reads with less than 16 (`min_length`) bases of RNA sequence after adapter and Poly-A trimming. These are assigned to their sample based on RT barcode and included in "_Total Sample Reads_", but are filtered before genome alignment \
+**Barcode Pass**: Reads for which all expected barcodes were found. Includes TooShortError which are reads with less than 16 (`min_length`) bases of RNA sequence after adapter and Poly-A trimming. These are assigned to their sample based on RT barcode and included in "_Total Sample Reads_", but are filtered before genome alignment \
 **Barcode Error**: Reads which were filtered because at least one barcode could not be found or matched against the expected sequences (whitelist). These reads are excluded from all further analysis
   
 ### Reads per Sample
@@ -24,9 +23,9 @@ The files called _{SampleName}.{LibraryName}.report.html_ contain the summary re
 **Passing Sample Reads**: Reads passing pre-alignment filters, specifically RNA sequence length after Poly-A trimming ("_Too Short Error_") \
 **Reads Mapped to Genome**: The fraction of _Passing Reads_ that are aligned anywhere to the genome. This includes multimapping reads \
 **Passing Read Alignments**: The fraction of mapped reads retained after alignment filtering; specifically excluding multimappers to more than 6 (`starMaxLoci`) loci \
-**Reads Mapped to Transcriptome**: The fraction of _Reads Mapped to Genome_ that match one or more annotated genes (exon or intron, in sense direction) \
+**Reads Mapped to Transcriptome**: The fraction of _Passing Read Alignments_ that match one or more annotated genes (exon or intron, in sense direction) \
 **Exonic Reads**: The fraction of _Reads Mapped to Transcriptome_ overlapping an exon in the sense direction \
-**Antisense Reads**: The fraction of _Reads Mapped to Genome_ overlapping an exon in the antisense direction (opposite from gene annotation) \
+**Antisense Reads**: The fraction of _Passing Read Alignments_ overlapping an exon in the antisense direction (opposite from gene annotation) \
 **Mitochondrial Reads**: The fraction of reads mapping to the mitochondrial genome (`chrM`) \
 **Saturation**: The overall sequencing saturation level of this sample; defined as `1 - (UniqueReads / TotalReads)` on _Reads Mapped to Transcriptome_ \
 **Average Trimmed Read Length**: The average length of RNA reads after adapter and Poly-A trimming \
@@ -38,7 +37,7 @@ The files called _{SampleName}.{LibraryName}.report.html_ contain the summary re
 **Note**: All numbers in this table depend on the number of cells called for the sample. Before interpreting these numbers, check the _Barcode Rank plot_ to confirm that it matches expectations. 
 
 **Cells called**: The number of cell barcodes passing filters to be [called as a cell](cellCalling.md) \
-**Reads per cell**: The overall number of _Passing Reads_ divided by the number of cells called \
+**Reads per cell**: The overall number of _Total Sample Reads_ divided by the number of cells called \
 **Median Unique Transcript Counts per cell**: The median number of transcripts detected per cell; i.e. unique reads mapped to the transcriptome \
 **Median Genes per cell**: The median number of unique genes detected per cell \
 **Reads in Cells**: The fractions of transcriptome reads that belong to a cell rather than a background barcode
@@ -52,7 +51,7 @@ This shows the unique transcript counts for each cell-barcode, sorted from high 
 This shows a statistical estimate for the unique transcript counts per cell that would be observed at different shallower sequencing levels for the sample ("_Total Sample Reads_")
 
 #### Genes Detected Per Cell
-This scatterplot shows the number of unique genes detected for each cell-barcode relative to the total passing reads for that barcode, separating cells from background barcodes. 
+This scatterplot shows the number of unique genes detected for each cell-barcode relative to the reads for that barcode, separating cells from background barcodes. 
 
 #### Saturation Per Cell
 This scatterplot shows the number of reads vs. the sequencing saturation (`1 - (UniqueReads / TotalReads)`) for each cell-barcode.

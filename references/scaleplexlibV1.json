@@ -54,7 +54,6 @@
             "start": 18,
             "length": 10,
             "name": "scaleplex",
-            "alias": "scaleplex",
             "type": "target",
             "tag": "sp",
             "sequences": "scaleplex.txt",
@@ -68,5 +67,6 @@
     "index2Seqs": "3lvlRNA_pcr.txt",
     "index2RevComp": false,
     "split_on": "index2"
-}
+},
+"trimAdapter": "-g GGAGAAGAAGGAGGAGGT -n 2"
 }

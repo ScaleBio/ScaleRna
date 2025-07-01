@@ -2,12 +2,6 @@
 * Perform downstream analysis of ScaleBio scRNA-seq data
 * It performs seurat-based clustering, azimuth-based cell type annotation, and optionally makes an anndata object
 *
-* Processes:
-*     SeuratClustering
-*     AzimuthMapping
-*     RnaDashboard
-*     CombineResults
-*     MakeAnnData
 */
 
 process SeuratClustering {
@@ -39,6 +33,7 @@ process SeuratClustering {
 		cellTypingDir = "cellTyping/$sample"
 	}
 	"""
+	export OPENBLAS_NUM_THREADS=${task.cpus - 1}
 	seuratClusteringV5.r --project $sample $wf \
 	--matrixDir $soloOut --allCells $cellReadMetrics
 	"""
@@ -71,6 +66,7 @@ process AzimuthMapping {
 		azimuthDir = "cellTyping/$sample"
 	}
 	"""
+	export OPENBLAS_NUM_THREADS=${task.cpus - 1}
 	azimuthMappingV5.r --reference ${params.azimuthRef} --project $sample \
 	$wf --matrixDir $soloOut --allCells $cellReadMetrics
 	"""
@@ -151,7 +147,7 @@ take:
 	samples
 	allCells
 	filteredMtx
-	sampleStats
+	cellCallingStats
 	libJson
 	comparison
 main:
@@ -198,11 +194,11 @@ main:
 			// Currently the downstream report does not handle this well.
 			// So we take the first file as "dummy" input and do not plot mad info in comparison reports.
 			// mad_thresh = path(mad_threshold.csv)
-			sample_stats = sampleStats.first().map{it[1]}
+			firstStats = cellCallingStats.first().map{it[1]}
 			// dashInput = [sampleId, path(sampleId_DownstreamResults.csv), path(sampleId_mad_threshold.csv)]
-			dashInput = CombineResults.out.results.combine(sample_stats)
+			dashInput = CombineResults.out.results.combine(firstStats)
 		} else {
-			dashInput = CombineResults.out.results.join(sampleStats)
+			dashInput = CombineResults.out.results.join(cellCallingStats)
 		}
 		// dashInput -> [sampleId/compSamples, path(DownstreamResults.csv), path(mad_threshold_info.csv), path(report.rmd) ]
 		dashInput = dashInput.combine(Channel.fromPath("$projectDir/bin/downstream_clustering_report.rmd", checkIfExists: true))

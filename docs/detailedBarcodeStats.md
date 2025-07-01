@@ -1,7 +1,7 @@
 ## Read Level metrics
 **Pass**: Reads for which all expected barcodes were found \
 **LinkerError**: Reads which were filtered because the fixed linker sequence between the barcodes could not be found \
-**BarcodeError**: Reads for which at least one barcode could not be matched against the expected sequences (whitelist) \
+**BarcodeError**: Reads for which at least one barcode could not be matched against the expected sequences (whitelist)
 **TooShortError**: Reads excluded from barcode matching because they were too short after adapter and Poly-A trimming
 
 ## Barcode level  metrics

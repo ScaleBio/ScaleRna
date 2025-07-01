@@ -8,15 +8,18 @@ import json
 from pathlib import Path
 from typing import Dict
 import datapane as dp
+import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import plotly.express as px
 from scale_utils import reporting
 from scale_utils.base_logger import logger
+from scale_utils.lib_json_parser import LibJsonParser
 
 
 def buildLibraryReport(
     libName: str,
-    libJson: Path,
+    lib_json_obj: LibJsonParser,
     demuxJson: Path,
     libMetrics: Path,
     internalReport: bool,
@@ -24,13 +27,14 @@ def buildLibraryReport(
     outDir: str,
     ultima: bool,
     minPassingSampleReads: int,
+    minDivergence: float,
 ):
     """
     Build the library report by calling relevant functions
 
     Args:
         libName: Library name
-        libJson: Library structure json
+        lib_json_obj: Object containing library structure information
         libMetrics: Path to library metrics
         internalReport: Flag denoting whether report is for internal purposes
         scalePlexLib: Flag denoting whether library is a ScalePlex library
@@ -38,11 +42,13 @@ def buildLibraryReport(
         ultima: Flag denoting whether sequencing data was generated on an Ultima instrument
         minPassingSampleReads: Minimum number of reads a sample must have post barcode
                                demux to be included in the report
+        minDivergence: threshold KL divergence score to pass bead
     """
-    libStruct = json.load(open(libJson))
     # need barcode cols for plate plots
     barcode_cols = [
-        barcode.get("alias") or barcode["name"] for barcode in libStruct["barcodes"] if barcode.get("plate")
+        barcode.get("alias") or barcode["name"]
+        for barcode in lib_json_obj.json_contents["barcodes"]
+        if barcode.get("plate")
     ]
     allCellsBetweenFiles = pd.read_parquet(
         libMetrics / "allCellsBetweenFiles.parquet", columns=["sample", "counts"] + barcode_cols
@@ -82,12 +88,31 @@ def buildLibraryReport(
         pages.append(readsPage)
 
     barcodeStatsDf, cellsPage, barcodeTypeStats = buildBarcodesPage(
-        demuxMetrics, libName, libJson, scalePlexLib, allCellsBetweenFiles, writeDir, ultima
+        demuxMetrics, libName, lib_json_obj, scalePlexLib, allCellsBetweenFiles, writeDir, ultima
     )
     pages.append(cellsPage)
 
-    if not ultima and internalReport:
-        pages.append(dp.Page(blocks=[dp.Group(barcodeReadStatsInternal, barcodeTypeStats)], title="InternalReport"))
+    bead_bc_group = None
+    library_beads_path = libMetrics / "libraryBeads.parquet"
+    if library_beads_path.exists():
+        Path(writeDir, "figures_internal").mkdir(exist_ok=True)
+        beads = pd.read_parquet(library_beads_path)
+        bead_scores = pd.read_parquet("bead_scores.parquet")
+        bead_reports = make_bead_report(beads, bead_scores, writeDir, libName, minDivergence)
+        bead_bc_group = dp.Group(dp.Text("## Bead BC"), dp.Group(blocks=bead_reports, columns=2))
+
+    if internalReport:
+        internal_report_page = dp.Page(
+            dp.Group(
+                dp.Group(dp.Text("## Read Metrics"), barcodeReadStatsInternal) if not ultima else dp.HTML("&nbsp;"),
+                dp.Group(dp.Text("## Barcode Metrics"), barcodeTypeStats) if not ultima else dp.HTML("&nbsp;"),
+                # bead bc group not present in 3-level assay
+                bead_bc_group if bead_bc_group else dp.HTML("&nbsp;"),
+                columns=1,
+            ),
+            title="InternalReport",
+        )
+        pages.append(internal_report_page)
 
     # Build a report object from the concatenated pages
     if len(pages) > 1:
@@ -108,22 +133,20 @@ def buildLibraryReport(
     report.save(writeDir / f"{prefix}.report.html")
 
 
-def buildDfForPlatePlot(allCellsBetweenFiles: pd.DataFrame, libJson: Path, bcName: str):
+def buildDfForPlatePlot(allCellsBetweenFiles: pd.DataFrame, lib_json_obj: LibJsonParser, bcName: str):
     """
     Construct dataframe that will be used for plotting heatmap
 
     Args:
         allCellsBetweenFiles: All cells information for this library
-        libJson: Library structure information
+        lib_json_obj: Object containing library structure information
         bcName: name of the barcode in lib.json
 
     Returns:
         Constructed dataframe
     """
-    libStruct = json.load(open(libJson))
-    libStructDir = libJson.parent  # Directory containing libStruct.json and associated sequence files
 
-    for bc in libStruct["barcodes"]:
+    for bc in lib_json_obj.json_contents["barcodes"]:
         if bc["name"] == bcName:
             bcInfo = bc
             break
@@ -132,7 +155,7 @@ def buildDfForPlatePlot(allCellsBetweenFiles: pd.DataFrame, libJson: Path, bcNam
 
     alias = bcInfo.get("alias") or bcInfo["name"]
     well_list = allCellsBetweenFiles[alias].to_list()
-    max_letter, max_number = reporting.getMaxWellNumberAndLetter(libStructDir / f'{bcInfo["sequences"]}')
+    max_letter, max_number = lib_json_obj.getMaxWellNumberAndLetter(lib_json_obj.parent_dir / f'{bcInfo["sequences"]}')
     allCellsBetweenFiles[f"{alias.lower()}_well"] = well_list
     well_df = pd.DataFrame(
         0, columns=range(1, max_number + 1), index=reporting.getCharacterIndices(65, ord(max_letter) + 1)
@@ -152,7 +175,7 @@ def buildDfForPlatePlot(allCellsBetweenFiles: pd.DataFrame, libJson: Path, bcNam
 def buildBarcodesPage(
     demuxJson: Dict,
     libName: str,
-    libJson: Path,
+    lib_json_obj: LibJsonParser,
     scalePlexLib: bool,
     allCellsBetweenFiles: pd.DataFrame,
     writeDir: Path,
@@ -167,7 +190,7 @@ def buildBarcodesPage(
     Args:
         demuxJson: Dictionary with the demuxed metrics
         libName: Library name
-        libJson: Library Structure Json
+        lib_json_obj: Object containing library structure information
         scalePlexLib: True if a ScalePlex library
         allCellsBetweenFiles: All cell information for this library
         writeDir: Write directory
@@ -180,47 +203,36 @@ def buildBarcodesPage(
         barcodeTypeStatsDf = None
         barcodeTypeStats = None
     else:
-        (barcodeTypeStatsDf, barcodeTypeStats) = createBarcodeTypeMetricsTables(demuxJson, libJson)
+        (barcodeTypeStatsDf, barcodeTypeStats) = createBarcodeTypeMetricsTables(demuxJson)
     blocks = [dp.Text(f"## libName: {libName}")]
     y_axis_label = "Unique ScalePlex Counts" if scalePlexLib else "Unique Transcript Counts"
-    libStruct = json.load(open(libJson))
-    for barcode in libStruct["barcodes"]:
+    for barcode in lib_json_obj.json_contents["barcodes"]:
         if not barcode.get("plate"):
             continue
-        df = buildDfForPlatePlot(allCellsBetweenFiles, libJson, barcode["name"])
+        df = buildDfForPlatePlot(allCellsBetweenFiles, lib_json_obj, barcode["name"])
         df.to_csv(writeDir / "csv" / f"library_{libName}_unique_reads_{barcode['alias']}_well.csv")
         plate_plot = reporting.buildPlatePlot(df, f"{barcode['alias']} Plate", 10000.0, y_axis_label)
         blocks.append(plate_plot)
     return (barcodeTypeStatsDf, dp.Page(blocks=blocks, title="Barcodes"), barcodeTypeStats)
 
 
-def getBarcodeAlias(libStruct: Dict, name: str):
-    """Get the full name (alias) for a barcode from the library structure Json"""
-    for bc in libStruct["barcodes"]:
-        if bc["name"] == name:
-            return bc.get("alias", name)
-    return None
-
-
-def createBarcodeTypeMetricsTables(demuxMetrics: Dict, libJson: Path):
+def createBarcodeTypeMetricsTables(demuxMetrics: Dict):
     """
     Create dataframe for barcode type and create a datapane
     object for storing a table created with the statistics in the dataframe
 
     Args:
         demuxMetrics: bcParser metrics (from metrics.json)
-        libStruct: Library structure (lib.json)
 
     Returns:
         Dataframe and dp.Group object
     """
-    libStruct = json.load(open(libJson))
     barcodesDf = buildDfFromJSONDict(demuxMetrics["barcodes"], "Barcode", "dict")
     tableGroup = []
     allBarcodes = list(barcodesDf["Barcode"].unique())
     for bc in allBarcodes:
         subset = barcodesDf[barcodesDf["Barcode"] == bc][["Match", "Reads"]]
-        styledDf = subset.style.pipe(reporting.styleTable, title=f"{getBarcodeAlias(libStruct, bc)} Barcodes")
+        styledDf = subset.style.pipe(reporting.styleTable, title=f"{bc} Barcodes")
         table = reporting.make_table(styledDf)
         tableGroup.append(table)
     return (barcodesDf, dp.Group(blocks=tableGroup, columns=2))
@@ -269,12 +281,10 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName, scalePlexLib, minPa
             total_reads += int(row["Reads"])
             total_percent += float(row["Percent"][:-1])
     df_pass = barcodeReadsTotal[barcodeReadsTotal["Status"].str.contains("Pass")]
+    # Include TooShortError in BarcodePass
+    df_pass_percent = str(round(float(df_pass.loc[0, "Percent"].replace("%", "")) + too_short_error_perc, 1)) + "%"
+    df_pass.loc[0, "Percent"] = df_pass_percent
     df_pass.at[df_pass.index[0], "Status"] = "Barcode Pass"
-    df_pass.loc[len(df_pass.index)] = [
-        "Too Short Error",
-        too_short_error_reads,
-        str(round(too_short_error_perc, 1)) + "%",
-    ]
     df_pass.loc[len(df_pass.index) + 1] = ["Barcode Error", total_reads, str(round(total_percent, 1)) + "%"]
     if scalePlexLib:
         barcodeHashReads = demuxJson["barcodes"]["scaleplex"]
@@ -330,8 +340,8 @@ def buildReadsPage(demuxJson, allCellsBetweenFiles, libName, scalePlexLib, minPa
             continue
         if sample_read_data[sample]["passingreads"] < minPassingSampleReads:
             error_msg += (
-                f"Sample {sample} has no passing reads post barcode demux. "
-                "Sample report was not generated for this sample. \n"
+                f"Sample {sample} has fewer than {minPassingSampleReads} passing reads post barcode demux. "
+                "No results are generated for this sample. \n"
             )
     if not scalePlexLib:
         if error_msg:
@@ -464,6 +474,122 @@ def buildDfFromJSONDict(jsonDict: Dict, name: str, valueDataType: str, choiceInd
     return pd.DataFrame(dictList)
 
 
+def make_bead_report(
+    all_beads: pd.DataFrame,
+    bead_scores: pd.DataFrame,
+    write_dir: Path,
+    lib_name: str,
+    min_divergence: float,
+) -> list[dp.Plot]:
+    """Bead rank plot, histogram and bead statistics
+
+    Args:
+        bead_df: Bead-level metrics
+        bead_scores: KL divergence scores for beads with > minUTC counts for > 1 RT
+        write_dir: Output directory
+        lib_name: Library name for file naming
+        min_divergence: Minimum KL divergence score to consider a bead as non-ambient
+
+    Returns:
+        Plot to include on internal report tab
+    """
+    if all_beads.empty:
+        return []
+    all_beads = all_beads.sort_values("counts", ignore_index=True, ascending=False)
+    all_beads["cell"] = (all_beads["pass"] > 0).rolling(25, min_periods=1).mean()
+    indices = reporting.sparseLogCoords(all_beads.index.size)
+    fig = px.scatter(
+        all_beads.iloc[indices],
+        x=indices,
+        y="counts",
+        color="cell",
+        labels={"x": "Bead barcodes", "counts": "Unique transcript counts"},
+        log_x=True,
+        log_y=True,
+        template=reporting.DEFAULT_FIGURE_STYLE,
+        title="Bead Rank Plot",
+        opacity=0.5,
+        color_continuous_scale=["rgb(178, 181, 187)", "rgb(39, 139, 176)"],
+        hover_data={"cell": True},
+    )
+    if indices.size > 0:
+        fig.update_layout(xaxis_range=[1, np.log10(max(indices) + 1)])
+    fig.write_image(write_dir / "figures_internal" / f"{lib_name}_BeadRankPlot.png")
+    bead_rank_plot = dp.Plot(fig)
+
+    cell_beads = all_beads[all_beads["pass"] > 0]
+    min_bead_frac = 0.05  # Beads with >= 5% of median cell bead counts are 'top beads' (could be empty / no cell)
+    bead_count_thres = int(round(cell_beads["counts"].median() * min_bead_frac)) if not cell_beads.empty else 100
+    top_beads = all_beads[all_beads["counts"] >= bead_count_thres]
+    # calculate histogram with matplotlib
+    max_pass = top_beads["pass"].max() if not top_beads.empty else 0
+    counts, bins, _ = plt.hist(top_beads["pass"], bins=range(max_pass + 2))
+
+    yaxis_title = "Number of beads"
+
+    # plot as bar chart in plotly so raw dataset is not saved to HTML report
+    fig = px.bar(
+        x=bins[:-1],
+        y=counts,
+        text_auto=True,
+        title=f"Number of Passing Cells per Bead<br><sup>Beads with >= {bead_count_thres} counts </sup>",
+        template=reporting.DEFAULT_FIGURE_STYLE,
+        labels={"x": "Number of passing cells", "y": yaxis_title},
+    )
+    fig.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
+    fig.update_layout(
+        yaxis_title=yaxis_title,
+        bargap=0.1,
+    )
+    fig.write_image(write_dir / "figures_internal" / f"{lib_name}_BeadPassHist.png")
+    bead_pass_hist = dp.Plot(fig)
+
+    bead_score_dist = dp.HTML("&nbsp;")
+    bead_stats = []
+    if not bead_scores.empty:
+        num_filtered_bead = bead_scores[bead_scores["kl_norm"] < min_divergence].shape[0]
+        bead_stats.append(("Beads below minimum KL divergence score", num_filtered_bead))
+        counts, bins, _ = plt.hist(bead_scores["kl_norm"], weights=bead_scores["bead_reads"], bins=100)
+
+        # plot as bar chart in plotly so raw dataset is not saved to HTML report
+        fig = px.bar(
+            x=bins[:-1],
+            y=counts,
+            title="RT barcode uniformity across beads<br><sup>Filtered to beads with > 1 RT above minUTC</sup>",
+            template=reporting.DEFAULT_FIGURE_STYLE,
+            labels={"x": "Normalized KL divergence score", "y": "Bead reads"},
+        )
+        fig.update_traces(textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
+        fig.update_layout(
+            bargap=0.0,
+        )
+        fig.add_vline(
+            x=min_divergence,
+            line_dash="dash",  # dashed line
+            line_color="red",
+            line_width=2,
+            annotation_text="Filter threshold",
+        )
+        fig.write_image(write_dir / "figures_internal" / f"{lib_name}_BeadScoreDist.png")
+        bead_score_dist = dp.Plot(fig)
+
+    reads_in_beads = top_beads["counts"].sum() / all_beads["counts"].sum()
+    reads_in_cell_beads = cell_beads["counts"].sum() / all_beads["counts"].sum()
+    bead_stats = [
+        ("Beads with cells", cell_beads.shape[0]),
+        ("Bead Threshold", bead_count_thres),
+        ("Beads above threshold", top_beads.shape[0]),
+        ("Reads in beads with cells", f"{reads_in_cell_beads:.1%}"),
+        ("Reads in beads above threshold", f"{reads_in_beads:.1%}"),
+    ] + bead_stats
+    bead_stats = pd.DataFrame.from_records(bead_stats, columns=["Metric", "Value"])
+    bead_stats_table = reporting.make_table(
+        bead_stats.style.pipe(reporting.styleTable, title="Bead Statistics", numericCols=["Value"])
+    )
+
+    return [bead_rank_plot, bead_pass_hist, bead_stats_table, bead_score_dist]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--libName", required=True)
@@ -484,12 +610,20 @@ def main():
         type=int,
         help="Minimum number of reads a sample must have post barcode demux to be included in the report",
     )
+    parser.add_argument(
+        # Minimum KL divergence score to consider a bead as non-ambient
+        # Normalized range is roughly 0-1, with 0 perfectly matching the library RT count distribution
+        "--minDivergence",
+        default=0.05,
+        type=float,
+        help="Minimum normalized KL divergence score to consider a bead as non-ambient",
+    )
 
     args = parser.parse_args()
 
     buildLibraryReport(
         args.libName,
-        args.libStruct,
+        LibJsonParser(args.libStruct),
         args.demuxMetrics,
         args.libMetrics,
         args.internalReport,
@@ -497,6 +631,7 @@ def main():
         args.outDir,
         args.ultima,
         args.minPassingSampleReads,
+        args.minDivergence,
     )
 
 

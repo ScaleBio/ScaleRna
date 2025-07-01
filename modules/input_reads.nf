@@ -1,31 +1,40 @@
 /*
 * Perform fastq generation, barcode processing, sample demux and qc of input data
 *
-* Processes:
-*     MakeBclConvertSamplesheet
-*     BclConvert
-*     TrimFq
-*     FastQC
-*     MultiQC
-*     BarcodeParser
-*     MergeDemux
 */
+include { LibraryDetection } from './library_detection.nf'
+
 def getReadFromFqname(fqName) {
     def m = ( fqName =~ /_([RI][12])[_.]/ )
     if (!m) { return null }
     return m[0][1]
 }
 
+// Return the libraries that were filtered out
+def getFilteredLibraries(allLibNames, allInputLibNames, reason) {
+	allInputLibNames
+		.map { it ->
+			def rows = []
+			for (libName in it) {
+				// Indicates library that was filtered out due to @reason
+				if (!(libName in allLibNames.val)) {
+					rows.add(",${libName},0,${reason}")
+				}
+			}
+			rows
+		}
+}
+
 // Compute read to be trimmed based on library structure definition
 // Return string corresponding to read (read1 or read2) that will be found in fastq filename
-def getReadToProcess(libJson) {
+def getReadToProcess(genomic_r1, genomic_r2) {
     def readToProcess1 = ""
     def readToProcess2 = ""
-    if (libJson['genomic_r1']) {
+    if (genomic_r1) {
         readToProcess1 = "_R1_"
         readToProcess2 = "_R1."
     }
-    else if (libJson['genomic_r2']) {
+    else if (genomic_r2) {
         readToProcess1 = "_R2_"
         readToProcess2 = "_R2."
     }
@@ -111,38 +120,13 @@ process BclConvert {
 	path("fastq/Reports/*"), emit: stats
 
 	script:
-	wthreads = (task.cpus/2 - 0.5).round()
-	dthreads = (task.cpus/3 - 0.5).round()
+	wthreads = [1, (task.cpus/2 - 0.5).round()].max()
+	dthreads = [1, (task.cpus/3 - 0.5).round()].max()
 	"""
 	bcl-convert --sample-sheet $samplesheet --bcl-input-directory $run \
     --bcl-num-conversion-threads $wthreads --bcl-num-compression-threads $wthreads --bcl-num-decompression-threads $dthreads \
     $params.bclConvertParams --output-directory fastq
 	"""
-}
-
-// Map fastq files to PCR index
-process LibraryDetection {
-	tag "${idx2Fq.getSimpleName()}"
-
-	input:
-	path(idx2Fq)
-	path(libStructDir)
-	val(libStructName)
-	path("scalePlexLibStructDir") 
-	val(scalePlexLibStructName)
-
-	output:
-	path("fastq_to_pool_mapping.csv", emit: fastq_to_pool_mapping)
-
-	script:
-	opts = ""
-	if (params.scalePlex) {
-		opts = "--scalePlexLibraryStruct scalePlexLibStructDir/$scalePlexLibStructName "
-	}
-	"""
-	sniff_fastq.py --fastqDir . --libraryStruct $libStructDir/$libStructName $opts
-	"""
-
 }
 
 // Run cutadapt on read2 fastq files
@@ -151,23 +135,25 @@ process TrimFq {
 
 	input:
 	tuple(val(libName), val(matching_key), path(fqFiles))
+	val(rnaTrimAdapter)
+	val(scalePlexTrimAdapter)
+	val(quantum)
 
 	output: 
 	tuple(val(libName), val(matching_key), path("trimmed/*.fastq.gz"), emit: fastq)
 	path("*.trim_stats"), emit: stats_for_multiqc
 
 	script:
-	// If list of read2 fastq files is provided, each file needs to be trimmed separately
-	if (params.quantum) {
+	if (quantum) {
 		if (params.scalePlex) {
-			trimAdaptOpts = params.trimAdaptQuantumScalePlex
+			trimAdaptOpts = scalePlexTrimAdapter
 		} else {
-			trimAdaptOpts = params.trimAdaptQuantum
+			trimAdaptOpts = rnaTrimAdapter
 		}
 	} else if (params.scalePlex) {
-		trimAdaptOpts = "${params.trimAdapt3L} ${params.scalePlexTrimAdapt}"
+		trimAdaptOpts = "${rnaTrimAdapter} ${scalePlexTrimAdapter}"
 	} else {
-		trimAdaptOpts = params.trimAdapt3L
+		trimAdaptOpts = rnaTrimAdapter
 	}
 	"""
 	mkdir trimmed
@@ -276,16 +262,16 @@ process MergeDemux {
 	publishDir { file(params.outputDir) / dir_name }, mode:'copy'
 
 	input:
-    tuple(val(libName), path("demux_metrics*.json"))
+    	tuple(val(libName), path("demux_metrics*.json"))
 	// List of hash libraries, [] if not --scalePlex
 	val(hashLibNames)
 	path(libStructDir)
-    val(libStructName)
+    	val(libStructName)
 	path("scalePlexLibStructDir") // Cannot use a variable here since it will cause input name collision if libStructDir and scalePlexLibStructDir are the same
 	val(scalePlexLibStructName)
 
 	output:
-    tuple(val(libName), path("*metrics.json"))
+    	tuple(val(libName), path("*metrics.json"))
 
 	script:
 	libStruct = "$libStructDir/$libStructName"
@@ -305,9 +291,7 @@ workflow INPUT_READS {
 take:
 	samples
 	samplesCsv
-	libStructure
-	libJson
-	scalePlexLibJson
+	libraryInfo
 	runFolder
 	fastqDir
 	runLibDetection
@@ -315,7 +299,10 @@ main:
 	runDir = runFolder
 	fqDir = fastqDir
 	fqs = null
-
+	samples
+		.collect { it.libName }
+		.unique()
+		.set { allInputLibNames }
 	if (runDir != null) {
 		if (params.fastqSamplesheet == null) {
 			// Get hash lib names
@@ -325,14 +312,23 @@ main:
 				.ifEmpty { [] }
 				.dump(tag:'hashLibNames')
 				.set { hashLibNames }
-			MakeBclConvertSamplesheet(samplesCsv, hashLibNames, libJson.getParent(), libJson.getName(),
-				        			  scalePlexLibJson.getParent(), scalePlexLibJson.getName(), 	
-					          		  file("$runDir/RunInfo.xml", checkIfExists:true))
+			MakeBclConvertSamplesheet(
+				samplesCsv,
+				hashLibNames,
+				libraryInfo.rnaLibraryStructureFile.getParent(),
+				libraryInfo.rnaLibraryStructureFile.getName(),
+				libraryInfo.scalePlexLibraryStructureFile.getParent(),
+				libraryInfo.scalePlexLibraryStructureFile.getName(),
+				file("$runDir/RunInfo.xml", checkIfExists:true)
+			)
 			fqSheet = MakeBclConvertSamplesheet.out
 		} else {
 			fqSheet = file(params.fastqSamplesheet)
 		}
-		BclConvert(file(runDir), fqSheet)
+		BclConvert(
+			file(runDir),
+			fqSheet
+		)
 		fqs = BclConvert.out.fastq.flatten()
 	} else if (fqDir != null) {
 		fqs = Channel.fromPath("$fqDir/**fastq.gz", checkIfExists: true)
@@ -343,17 +339,25 @@ main:
 	fqs.dump(tag:'fqs')
 
 	def isRc = false
+	// Need to set empty channel for the 3lvl case
+	filteredLibs = channel.value([])
 	if (runLibDetection) {
 		fqs
 			.filter{ !it.getName().contains("Undetermined") }
 			.filter{ getReadFromFqname(it.getName()) == 'I2' }
 			.ifEmpty { ParamLogger.throwError("No index2 fastq files found") }
+			.buffer(size: params.filesPerLibDetection, remainder: true)
 			.dump(tag:'index2Fq')
 			.set { idx2Fq }
 		// Run library detection on all index2 files
-		LibraryDetection(idx2Fq, libJson.getParent(), libJson.getName(),
-		                 scalePlexLibJson.getParent(), scalePlexLibJson.getName())
-		LibraryDetection.out.fastq_to_pool_mapping
+		LibraryDetection(
+			idx2Fq,
+			libraryInfo.rnaLibraryStructureFile.getParent(),
+			libraryInfo.rnaLibraryStructureFile.getName(),
+			libraryInfo.scalePlexLibraryStructureFile.getParent(),
+			libraryInfo.scalePlexLibraryStructureFile.getName()
+		)
+		LibraryDetection.out.pool_mapping
 			.collectFile(
 				name: 'fastq_file_to_library_assignment.csv',
 				keepHeader: true,
@@ -380,7 +384,7 @@ main:
 		poolMapping
 			.map { it ->
 				// Remove I2 from fastq file name to enable joining with other fastq files of same library
-				tuple(constructMatchingKey(it.fastq_file), it.pool)
+				tuple(constructMatchingKey(it.file), it.pool)
 			}
 			// Cross because for one I2 file, there is one I1, one R1 and one R2 file 
 			.cross(
@@ -408,8 +412,13 @@ main:
 			}
 			.dump(tag:'samplesAfterLibraryDetection')
 			.set { samples }
+		samples
+			.collect { it.libName }
+			.unique()
+			.set { allLibNamesAfterLibraryDetection }
+		filteredLibs = getFilteredLibraries(allLibNamesAfterLibraryDetection, allInputLibNames, "Library not found in input fastq files")
 	} else {
-		if (params.quantum) {
+		if (libraryInfo.quantum) {
 			fqs
 				.filter{ getReadFromFqname(it.getName()) == 'I2' }
 				.ifEmpty { ParamLogger.throwError("No index2 fastq files found") }
@@ -425,7 +434,7 @@ main:
 				.dump(tag:'fqsToFilter')
 				.set { fqsToFilter }
 			fqsToFilter.collect().view { items ->
-				log.info "Filtering out fastq files ${items} that are less than 1MB"
+				log.info "Filtering out fastq files ${items} that are less than $params.index2MinFileSize bytes"
 			}
 			fqs
 				.collect()
@@ -453,6 +462,15 @@ main:
 				.ifEmpty { ParamLogger.throwError("No matching fastq files found for libraries") }
 				.dump(tag:'samplesAfterFilteringSmallFiles')
 				.set { samples }
+			samples
+				.collect { it.libName }
+				.unique()
+				.set { allLibNamesAfterFilteringSmallFiles }
+			filteredLibs = getFilteredLibraries(
+				allLibNamesAfterFilteringSmallFiles,
+				allInputLibNames,
+				"Library filtered because all index2 fastq files are less than $params.index2MinFileSize bytes"
+			)
 		}
 		// Organize fastq files by sample
 		// fqFiles_with_fastq_matching_key -> (library_name, fastq_matching_key, file)
@@ -494,17 +512,17 @@ main:
 		}
 		// Check that each library has index1, read1 and read2 fastq files
 		if (it[3].any {fq -> fq.getName().contains("_R1_") || fq.getName().contains("_R1.")} == false) {
-			ParamLogger.throwError("Library ${it[0]} does not have read1 fastq file")
+			ParamLogger.throwError("Fastq file set ${it[3]} of library ${it[0]} is missing one/multiple read1 fastq file")
 		}
 		if (it[3].any {fq -> fq.getName().contains("_R2_") || fq.getName().contains("_R2.")} == false) {
-			ParamLogger.throwError("Library ${it[0]} does not have read2 fastq file")
+			ParamLogger.throwError("Fastq file set ${it[3]} of library ${it[0]} is missing one/multiple read2 fastq file")
 		}
 		if (it[3].any {fq -> fq.getName().contains("_I1_") || fq.getName().contains("_I1.")} == false) {
-			ParamLogger.throwError("Library ${it[0]} does not have index fastq file")
+			ParamLogger.throwError("Fastq file set ${it[3]} of library ${it[0]} is missing one/multiple index1 fastq file")
 		}
 	}
 
-	(readToProcess1, readToProcess2) = getReadToProcess(libStructure)
+	(readToProcess1, readToProcess2) = getReadToProcess(libraryInfo.rnaGenomicR1, libraryInfo.rnaGenomicR2)
 	// Get rna lib names
 	samples
 		.filter { it.rnaId == null }
@@ -581,7 +599,12 @@ main:
 		.set { fqSamplesHashReads }
 	
 	// Trim read1/read2 fastq file
-	TrimFq(fqSamplesReadToTrim)
+	TrimFq(
+		fqSamplesReadToTrim,
+		libraryInfo.rnaTrimAdapter,
+		libraryInfo.scalePlexTrimAdapter,
+		libraryInfo.quantum
+	)
 	TrimFq.out.fastq.dump(tag:'trimmedFqs')
 
 	// Take output fastqs of trim step and arrange them to feed into bcParser
@@ -629,7 +652,16 @@ main:
 		.set { bcParserInput }
 
 	// Process cell-barcodes and (optionally) split fastqs into samples based on sample barcode
-	BarcodeParser(samplesCsv, hashLibNames, libJson.getParent(), libJson.getName(), scalePlexLibJson.getParent(), scalePlexLibJson.getName(), bcParserInput, isRc)
+	BarcodeParser(
+		samplesCsv,
+		hashLibNames,
+		libraryInfo.rnaLibraryStructureFile.getParent(),
+		libraryInfo.rnaLibraryStructureFile.getName(),
+		libraryInfo.scalePlexLibraryStructureFile.getParent(),
+		libraryInfo.scalePlexLibraryStructureFile.getName(),
+		bcParserInput,
+		isRc
+	)
 	BarcodeParser.out.bam.dump(tag:'bcParserBam')
 	// Check that there exists bam files post bcParser, for every sample that corresponds to a libName in samples.csv
 	samples
@@ -659,8 +691,9 @@ main:
 				}
 			}
 		}
-	// Calculate total sample reads for rna libraries
+	// Calculate total sample reads for rna and scaleplex libraries
 	rnaLibNames
+		.concat(hashLibNames)
 		.flatMap()
 		.unique()
 		.cross(BarcodeParser.out.metrics)
@@ -688,22 +721,36 @@ main:
 					}
 				}
 			}
-			def outputFile = file("${params.outputDir}/reports/csv/reads_per_sample.csv")
+			def outputFile = file("${params.outputDir}/reports/reads_per_sample.csv")
+			// Parent directory does not exist at this point
+			outputFile.getParent().mkdirs()
 			// Sort so that csv has rows in deterministic order
 			def sortedReadsBySampleID = readsBySampleID.entrySet().sort { a, b -> a.key <=> b.key }
-			// reports and csv folder do not exist at this point, need to make those directories before placing file there
-			outputFile.getParent().mkdirs()
-			outputFile.withWriter { writer ->
-				writer.writeLine("SampleID,PassingReads")
-				for (entry in sortedReadsBySampleID) {
-					writer.writeLine("${entry.key},${entry.value['passingreads']}")
+			def contentToWrite = ["Sample,Library,PassingReads,TotalReads,Comment"]
+			for (entry in sortedReadsBySampleID) {
+				def sampleName = entry.key.tokenize('.')[0]
+				def libName = entry.key.tokenize('.')[1]
+				def msg = ""
+				if ((libName in rnaLibNames.val) && (entry.value['passingreads'] < params.minPassingSampleReads)) {
+					msg = "Filtered because sample has less than ${params.minPassingSampleReads} passing reads"
+				}
+				contentToWrite.add("${sampleName},${libName},${entry.value['passingreads']},${entry.value['totalReads']},${msg}")
+			}
+			outputFile.text = (contentToWrite + filteredLibs.val).join('\n')
+			// We don't want to apply read number thresholding to ScalePlex libraries
+			// Drop ScalePlex libraries and move forward with just RNA libraries
+			def rnaReadsBySampleID = [:]
+			for (sample in readsBySampleID) {
+				def libName = sample.key.tokenize('.')[1]
+				if (libName in rnaLibNames.val) {
+					rnaReadsBySampleID[sample.key] = sample.value
 				}
 			}
 			// Drop samples where the passingreads is less than minPassingSampleReads
-			readsBySampleID = readsBySampleID.findAll { key, value -> value['passingreads'] >= params.minPassingSampleReads }
+			rnaReadsBySampleID = rnaReadsBySampleID.findAll { key, value -> value['passingreads'] >= params.minPassingSampleReads }
 			def totalSampleReadsBySampleID = [:]
 			// Need only totalReads for computation downstream, drop passingreads
-			for (sample in readsBySampleID) {
+			for (sample in rnaReadsBySampleID) {
 				totalSampleReadsBySampleID[sample.key] = sample.value['totalReads']
 			}
 			// Convert map to list of lists to enable converting it to a channel that can be joined on later
@@ -716,7 +763,7 @@ main:
 	totalSampleReadsBySampleID
 		.map { it[0] }
 		.collect()
-		.ifEmpty { ParamLogger.throwError("No sample in experiment has ${params.minPassingSampleReads} reads post barcode demux") }
+		.ifEmpty { ParamLogger.throwError("No RNA sample has at least ${params.minPassingSampleReads} reads post barcode demux") }
 		.set { sampleIdFromTotalSampleReadsBySampleID }
 	// Construct samples object with samples that have passing reads
 	samples
@@ -797,16 +844,21 @@ main:
 		if (runDir != null) {
 			reports = reports.mix(BclConvert.out.stats)
 		}
-		if (params.trimFastq) {
-			reports = reports.mix(TrimFq.out.stats_for_multiqc)
-		}
+		reports = reports.mix(TrimFq.out.stats_for_multiqc)
 		MultiQC(reports.collect())
 	}
 
 	if (params.splitFastq) {
 		// Need to merge the bcParser outputs for a single library together
 		organized_demux = BarcodeParser.out.metrics.groupTuple()
-		MergeDemux(organized_demux, hashLibNames, libJson.getParent(), libJson.getName(), scalePlexLibJson.getParent(), scalePlexLibJson.getName())
+		MergeDemux(
+			organized_demux,
+			hashLibNames,
+			libraryInfo.rnaLibraryStructureFile.getParent(),
+			libraryInfo.rnaLibraryStructureFile.getName(),
+			libraryInfo.scalePlexLibraryStructureFile.getParent(),
+			libraryInfo.scalePlexLibraryStructureFile.getName()
+		)
 		metrics = MergeDemux.out
     }
 	else {

@@ -4,16 +4,18 @@
     {"read": "index1", "start": 0, "length": 8, "name": "bead1", "sequences": "quantum_bead_barcode1.txt", "alias":"bead1", "level":2},
     {"read": "index1", "start": 12, "length": 8, "name": "bead2", "sequences": "quantum_bead_barcode2.txt", "alias":"bead2", "level":2},
     {"read": "index1", "start": 24, "length": 8, "name": "bead3", "sequences": "quantum_bead_barcode3.txt", "alias":"bead3", "level":2},
-    {"read": "read2", "start": 8, "length": 8, "name": "PBC", "sequences": "quantum_pbc.txt", "alias":"PBC", "level":1, "plate":true},
+    {"read": "read2", "start": 8, "length": 8, "name": "RT", "sequences": "quantum_rt.txt", "alias":"RT", "level":1, "plate":true},
     {"read": "read2", "start":0, "length": 8, "name": "umi", "type": "umi"}
 ],
-"sample_barcode":"PBC",
+"sample_barcode":"RT",
 "genomic_r1": {"start": 0, "min_length": 16},
 "bcl_convert": {
-    "library_barcodes": {"sequences":"quantum_pcr_pool.txt", "libIndexUsed":"libIndex2"},
+    "library_barcodes": {"sequences":"index2Seqs", "libIndexUsed":"libIndex2"},
     "index1Seqs": "quantum_bead_barcode1.txt",
     "index2Seqs": "quantum_pcr_pool.txt",
     "index1BClen": 8,
     "split_on": "index1,index2"
-}
+},
+"quantum": true,
+"trimAdapter": "-a A{8}N{100} -a G{12}N{100} -n 2"
 }

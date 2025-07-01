@@ -2,13 +2,8 @@
 * Create hash UMI matrices for each sample from the barcodes csv output by bcParser
 * and use along with RNA passing cells to generate metrics and filtered UMI matrix
 *
-* Processes:
-*     CountScalePlex
-*     MergeCountRaw
-*     MetricsGeneration
 */
 include { SCALE_PLEX_REPORTING as REPORTING } from './scale_plex_metrics.nf'
-include { SCALE_PLEX_REPORTING as MERGED_REPORTING } from './scale_plex_metrics.nf'
 
 process CountScalePlex {
     tag "$meta.subsample"
@@ -48,41 +43,15 @@ process MergeCountRaw {
     script:
     id = meta.sample + "." + meta.lib
     """
-    merge_metrics.py $cellMetrics --id $id
+    concat_columnar.py $cellMetrics --outputFile "${id}.cellMetrics.parquet"
     merge_mtx.py $mtx --id $id
     """
 }
 
-process MergeSamples {
-    tag "$meta.sample"
-	label 'large'
-
-    input:
-    tuple val(meta), path(cellMetrics), path("raw_??????.mtx.gz"), val(barcodes), val(rnaId) // pad filenames with 0s so they sort correctly
-
-    output:
-    tuple val(meta), path("${id}.cellMetrics.parquet"), path("${id}.raw.umi.mtx.gz"), emit: countRawMerged
-    tuple val(meta), val(mergedBarcodes), emit: mergedBarcodes
-
-    script:
-    id = "${meta.sample}.merged"
-    // merge expected fixation plate wells for each sample in the group
-    if (barcodes.every { it }) {
-        mergedBarcodes = barcodes.join(';')
-    } else {
-        // if it's null or '' for any sample in the group, result is null, i.e. allow any valid combos
-        mergedBarcodes = null
-    }
-    """
-    merge_metrics.py $cellMetrics --id $id --rnaId ${rnaId.join(" ")}
-    merge_mtx.py raw_*.mtx.gz --id $id
-    """
-}
 
 workflow SCALE_PLEX {
     take:
-        libJson
-        scalePlexToRnaMapping
+        libraryInfo
         samples
         ubam
         allCells
@@ -97,7 +66,13 @@ workflow SCALE_PLEX {
                 file_ext = 'bam'
             }
             // CountScalePlex on output of bcParser, dropping where sample was not identified
-            CountScalePlex(libJson.getParent(), libJson.getName(), file_ext, scalePlexToRnaMapping, ubam.filter { meta, _ubam_file -> meta.sample != 'Unknown' })
+            CountScalePlex(
+                libraryInfo.scalePlexLibraryStructureFile.getParent(),
+                libraryInfo.scalePlexLibraryStructureFile.getName(),
+                file_ext,
+                libraryInfo.scalePlexToRnaMappingFile,
+                ubam.filter { meta, _ubam_file -> meta.sample != 'Unknown' }
+            )
             CountScalePlex.out.countRaw
                 .map { meta, cellMetrics, rawUmi ->
                     // drop subsample that was used for splitting
@@ -112,37 +87,15 @@ workflow SCALE_PLEX {
                     | set { perSampleCountRaw }
             }
         }
-        REPORTING(perSampleCountRaw, libJson, samples, allCells.id, libCount.id)
-        if (params.merge) {
-            perSampleCountRaw
-                .join(
-                    samples
-                        .map { [[lib:it.libName, sample:it.sample], it.group, it.scalePlexBarcodes, it.rnaId] }
-                )
-                .groupTuple(by: 3) // grouping on samples.csv group column
-                .filter { it[0].size() > 1 } // Only merge groups with more than one sample libname combination
-                .map { 
-                    _meta, cellMetrics, rawUmi, group, scalePlexBarcodes, rnaId ->
-                        [[lib:'merged', sample:group], cellMetrics, rawUmi, scalePlexBarcodes, rnaId]
-                }
-                .dump(tag:'perMergedSampleCountRaw')
-                .set { perMergedSampleCountRaw }
-            MergeSamples(perMergedSampleCountRaw)
-            perMergedSampleCountRaw
-                .join(MergeSamples.out.mergedBarcodes)
-                .map { meta, _cellMetrics, _rawUmi, _barcodes, _rnaId, mergedBarcodes ->
-                    // build samples channels for merging
-                    ['libName':meta.lib, 'sample':meta.sample, 'rnaId':meta.sample, 'scalePlexBarcodes':mergedBarcodes]
-                }
-                .dump(tag:'mergedSamples')
-                .set { mergedSamples }
-            MERGED_REPORTING(MergeSamples.out.countRawMerged, libJson, mergedSamples, allCells.merged, libCount.merged)
-            mergedMetrics = MERGED_REPORTING.out.metrics
-        } else {
-            mergedMetrics = Channel.empty() // initialize mergedMetrics
-        }
+        REPORTING(
+            perSampleCountRaw,
+            libraryInfo.scalePlexLibraryStructureFile,
+            samples,
+            allCells,
+            libCount
+        )
     
     emit:
         metrics = REPORTING.out.metrics
-        mergedMetrics = mergedMetrics
+        allCells = REPORTING.out.allCells
 }

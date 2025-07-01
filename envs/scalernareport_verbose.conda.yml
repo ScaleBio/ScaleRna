@@ -1,12 +1,10 @@
 name: scalereport
 channels:
   - conda-forge
-  - https://repo.anaconda.com/pkgs/main
-  - https://repo.anaconda.com/pkgs/r
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
-  - alsa-lib=1.2.13=hb9d3cd8_0
+  - alsa-lib=1.2.14=hb9d3cd8_0
   - altair=5.5.0=pyhd8ed1ab_1
   - asttokens=3.0.0=pyhd8ed1ab_1
   - attr=2.5.1=h166bdaf_1
@@ -40,7 +38,7 @@ dependencies:
   - chardet=5.2.0=pyhd8ed1ab_3
   - colorlog=6.9.0=pyh707e725_1
   - comm=0.2.2=pyhd8ed1ab_1
-  - contourpy=1.3.1=py310h3788b33_0
+  - contourpy=1.3.2=py310h3788b33_0
   - cycler=0.12.1=pyhd8ed1ab_1
   - cyrus-sasl=2.1.27=h54b06d7_7
   - datapane=0.17.0=pyhd8ed1ab_0
@@ -131,12 +129,12 @@ dependencies:
   - libgomp=14.2.0=h767d61c_2
   - libgoogle-cloud=2.36.0=hc4361e1_1
   - libgoogle-cloud-storage=2.36.0=h0121fbd_1
-  - libgpg-error=1.51=hbd13f7d_1
+  - libgpg-error=1.53=hbd13f7d_0
   - libgrpc=1.71.0=he753a82_0
   - libiconv=1.18=h4ce23a2_1
   - libjpeg-turbo=3.0.0=hd590300_1
   - liblapack=3.9.0=31_h7ac8fdf_openblas
-  - libllvm20=20.1.2=ha7bfdaf_0
+  - libllvm20=20.1.3=he9d0ab4_0
   - liblzma=5.8.1=hb9d3cd8_0
   - libnghttp2=1.64.0=h161d5f1_0
   - libnsl=2.0.1=hd590300_0
@@ -182,7 +180,7 @@ dependencies:
   - munkres=1.1.4=pyh9f0ad1d_0
   - mysql-common=9.0.1=h266115a_6
   - mysql-libs=9.0.1=he0572af_6
-  - narwhals=1.34.1=pyhd8ed1ab_0
+  - narwhals=1.35.0=pyh29332c3_0
   - ncurses=6.5=h2d0b736_3
   - nest-asyncio=1.6.0=pyhd8ed1ab_1
   - nspr=4.36=h5888daf_0
@@ -207,7 +205,7 @@ dependencies:
   - plotly=5.15.0=pyhd8ed1ab_0
   - ply=3.11=pyhd8ed1ab_3
   - polars=0.20.18=py310h4fc593a_0
-  - prompt-toolkit=3.0.50=pyha770c72_0
+  - prompt-toolkit=3.0.51=pyha770c72_0
   - psutil=7.0.0=py310ha75aee5_0
   - pthread-stubs=0.4=hb9d3cd8_1002
   - ptyprocess=0.7.0=pyhd8ed1ab_1
@@ -217,8 +215,8 @@ dependencies:
   - pyarrow-core=17.0.0=py310hac404ae_2_cpu
   - pygments=2.19.1=pyhd8ed1ab_0
   - pyparsing=3.2.3=pyhd8ed1ab_1
-  - pyqt=5.15.10=py310hb3b5edb_0
-  - pyqt5-sip=12.13.0=py310hf71b8c6_0
+  - pyqt=5.15.10=py310hb3b5edb_1
+  - pyqt5-sip=12.13.0=py310hf71b8c6_1
   - pysocks=1.7.1=pyha55dd90_7
   - python=3.10.17=hd6af730_0_cpython
   - python-dateutil=2.9.0.post0=pyhff2d567_1

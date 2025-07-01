@@ -196,7 +196,7 @@ def merge_log_files(star_logs: list, log_out_dir: Path):
 def main():
     parser = argparse.ArgumentParser(description="Merge star solo outputs into one")
     parser.add_argument(
-        "--star_dirs", nargs="+", type=Path, required=True, help="star output directories that need to be concatenated"
+        "--star_dirs", nargs="+", type=Path, required=False, help="star output directories that need to be concatenated"
     )
     parser.add_argument(
         "--star_log", nargs="+", type=Path, required=True, help="STAR log files that need to be concatenated"
@@ -206,18 +206,20 @@ def main():
     )
     parser.add_argument("--star_matrix", type=str, default="matrix.mtx", help=".mtx file name")
     parser.add_argument("--star_feature", type=str, help="Feature-type (e.g. GeneFull) in the STAR output to merge")
-    parser.add_argument("--out_dir", type=Path, required=True, help="merged sample output directory")
+    parser.add_argument("--out_dir", type=Path, required=False, help="merged sample output directory")
     parser.add_argument("--log_out_dir", type=Path, required=True, help="merged sample log output directory")
     args = parser.parse_args()
 
-    if args.sample_ids and len(args.star_dirs) != len(args.sample_ids):
-        raise ValueError("Number of sample IDs not equal to number of star output directories")
+    # If no star_dirs are provided, only need to merge log files
+    if args.star_dirs is not None:
+        if args.sample_ids and len(args.star_dirs) != len(args.sample_ids):
+            raise ValueError("Number of sample IDs not equal to number of star output directories")
 
-    merged_star_path = args.out_dir / args.star_feature
-    merged_star_path.mkdir(parents=True, exist_ok=True)
-    args.log_out_dir.mkdir(parents=True, exist_ok=True)
-    merge_matrix_and_barcode(args.star_dirs, args.star_feature, args.star_matrix, args.sample_ids, merged_star_path)
-    merge_cell_reads(args.star_dirs, args.star_feature, args.sample_ids, merged_star_path)
+        merged_star_path = args.out_dir / args.star_feature
+        merged_star_path.mkdir(parents=True, exist_ok=True)
+        args.log_out_dir.mkdir(parents=True, exist_ok=True)
+        merge_matrix_and_barcode(args.star_dirs, args.star_feature, args.star_matrix, args.sample_ids, merged_star_path)
+        merge_cell_reads(args.star_dirs, args.star_feature, args.sample_ids, merged_star_path)
     merge_log_files(args.star_log, args.log_out_dir)
 
 

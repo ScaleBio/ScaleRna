@@ -1,9 +1,27 @@
+# Version 2.1
+## 2.1.0
+* Cell-calling is done for each sub-library separately, improving performance for large runs
+* Changes to CellFinder to align more closely with EmptyDrops
+  	- Cell-barcodes far below the median unique transcript count (`medianFraction`) are never called cells
+* Beads exposed to a large ambient RNA signal are filtered by default
+* Ultima .cram input supported without fixed filename pattern
+* Short reads after adapter and Poly-A trimming are not longer reported in the library QC reports
+ 	- These reads are included in "Total Sample Reads" in the sample reports
+* Saturation is always calculated on all transcriptome reads
+  	- Unique and multimappers and both genomes for barnyard samples
+* Barcode naming changes
+	- The barcode from the RT plate is called `RT` and no longer `pbc` barcode
+	- Bead barcode blocks are `01`-`96`, instead of `1A`-`12H`
+* The workflow now checks minimal compute resource requirements after start-up
+* Updated example `samplesheet.csv` [files](docs/examples/fastq-generation/)
+	- The index orientation needed for NextSeq 2000 and NovaSeq X is now the default, rather than `_revComp`
+
 # Version 2.0
 ## 2.0.1
 * Remove trimming of cDNA (RNA) read to max 82bp length
 * Make QuantumScale RNA the default library type
 ## 2.0.0
-* Add support for QuantumScale kit v1.0
+* Add support for QuantumScale RNA data
 * Run cutadapt upstream of barcode demux to do adapter trimming
 * Output unaligned BAM files post barcode demux, that are then sent to STAR as input
 * Perform read length filtering during barcode demux
@@ -11,6 +29,7 @@
 * For barnyard experiments cell calling is now performed on a species-by-species basis
 * Species specific metrics are now reported in the sample report for barnyard experiments
 * Added sF, gn, and gx tags to BAM file output by STAR
+* Updated read metric definitions, e.g. "Reads mapped to Transcriptome"; see [RNA QC reports](docs/qcReport.md)
 
 # Version 1.6
 ## 1.6.2

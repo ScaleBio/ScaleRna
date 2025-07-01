@@ -10,6 +10,7 @@ For detailed information about the library and sample level QC reports see [qcRe
 | | `<sample>.<libIndex2>.report.html` | A standalone report including key QC metrics and figures for each sample; (`merged` for extended throughput runs)|
 | | `<sample>_libraries` | For QuantumScale runs, individual sample reports for each library separately
 | | `allSamples.reportStatistics.csv` | QC metrics from all samples in this analysis in one table
+| | `reads_per_sample.csv` | Number of passing reads per sample post barcode demux
 | | `csv/` | Summary and QC metrics for this sample in csv format |
 | `reports/library` | `library_<libIndex2>.report.html` | Barcode summary and demultiplexing statistics for the whole sequencing library |
 | | `csv/` | Summary and QC metrics for this library in csv format | 
@@ -45,9 +46,7 @@ Columns in the `<sample>.<libIndex2>.allCells.csv` file:
 | Saturation | `1 - (UniqueReads / TotalReads)` on _Reads Mapped to Transcriptome_ |
 | mitoProp | Proportion of mapped reads that aligned to mitochondrial genome |
 | PCR | The alias for the PCR (library) barcode |
-| PBC | The RT well |
+| RT | RT plate well |
 | bead_bc | The bead barcode (microwell) |
-| bead_bcs_total | The number of cell-barcodes that are associated with this bead |
-| bead_bcs_pass | The number of passing cells associated with this bead |
 | sample | The sample name |
 | flags | QC flags |

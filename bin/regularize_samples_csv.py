@@ -9,11 +9,11 @@ Writes the normalized samples.csv to stdout
 import argparse
 import csv
 import sys
-import json
 import pandas as pd
 from pathlib import Path
 from typing import Optional, Dict
 from scale_utils.validation import validateName
+from scale_utils.lib_json_parser import LibJsonParser
 
 
 COL_NAMES_WHITELIST = [
@@ -73,7 +73,9 @@ def fail(msg: str, sep=" "):
         sep: Separator to use when printing the error message
     """
     print(msg, file=sys.stderr, sep=sep)
-    sys.exit(1)
+    # Custom exit code to prevent retries
+    # Used in nextflow config
+    sys.exit(42)
 
 
 def unwrapSemiColonSeparatedValues(cols: list, rows: list, index: int, scale_plex_col_name: str) -> list:
@@ -100,7 +102,7 @@ def unwrapSemiColonSeparatedValues(cols: list, rows: list, index: int, scale_ple
                 split_scaleplexLibs = r[cols.index(scale_plex_col_name)].split(";")
                 split_scaleplexLibs = [libname.strip() for libname in split_scaleplexLibs]
                 if len(split_libs) != len(split_scaleplexLibs):
-                    raise ValueError(
+                    fail(
                         f"Number of scalePlex entries {r[cols.index(scale_plex_col_name)]} "
                         f"must match number of rna entries {r[index]}"
                     )
@@ -160,22 +162,22 @@ def readSamplesCsv(samplesCsv: Path, quantum: bool, fastq_input: bool, reporting
                 row = row[:-1]
 
             if len(row) != len(cols):
-                fail("Unexpected number of columns:", row, sep="\n")
+                fail(f"Unexpected number of columns: {row}", sep="\n")
             rows.append(row)
     if "libName" not in cols and "libIndex" in cols:
         for r in rows:
             if ";" in r[cols.index("libIndex")]:
-                raise ValueError("libName is required if libIndex lists multiple index sequences")
+                fail("libName is required if libIndex lists multiple index sequences")
     if "libName" in cols and "libIndex" in cols:
         for r in rows:
             if ";" in r[cols.index("libIndex")] and ";" in r[cols.index("libName")]:
-                raise ValueError("Cannot list multiple libIndex if listing multiple libName")
+                fail("Cannot list multiple libIndex if listing multiple libName")
     if quantum and not reporting:
         if "libIndex2" in cols and "libName" in cols:
-            raise ValueError("Please provide a value for only the libIndex2 column or the libName column, not both")
+            fail("Please provide a value for only the libIndex2 column or the libName column, not both")
         if not fastq_input:
             if "libName" in cols:
-                raise ValueError("When starting from bcl files, do not provide a value for the libName column")
+                fail("When starting from bcl files, do not provide a value for the libName column")
     # Normalize index sequences
     for idx_col in ["libIndex", "libIndex2", "scalePlexLibIndex", "scalePlexLibIndex2"]:
         if idx_col in cols:
@@ -229,28 +231,6 @@ def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, sample
         # Check whether the barcode ranges overlap amongst individual samples
         if len(verbose_barcodes_list) != len(set(verbose_barcodes_list)):
             fail("The barcodes range mentioned for each sample overlap amongst individual samples")
-
-
-def get_barcodes_range(libraryStruct: Path) -> tuple[str, Path]:
-    """
-    Get upper and lower end of permissible range for barcodes along with the sample barcodes whitelist filename
-    Args:
-        libraryStruct: Path to library structure json file
-    """
-    # Parse lib json
-    with open(libraryStruct) as f:
-        libJson = json.load(f)
-
-    if "sample_barcode" not in libJson:
-        raise ValueError("sample_barcode not found in library structure json")
-
-    # Get file corresponding to sample barcode so maximum well coordinate string can be computed
-    for entry in libJson["barcodes"]:
-        if entry["name"] == libJson["sample_barcode"]:
-            sample_barcode_fname = libraryStruct.parent / f"{entry['sequences']}"
-            start, end = get_first_and_last_entry(sample_barcode_fname)
-
-    return f"{start}-{end}", sample_barcode_fname
 
 
 def get_first_and_last_entry(file: Path, sep: str = "\t") -> tuple[str, str]:
@@ -349,9 +329,8 @@ def unwrap_barcodes_range(
 def add_all_alias_for_index(
     cols: list[str],
     rows: list[list[str]],
-    read: str,
+    all_aliases: list[str],
     col_name: str,
-    libraryStruct: Path,
     scaleplex_col_name: str,
     scaleplex_to_rna_mapping: dict[str:str],
 ) -> list[list[str]]:
@@ -361,7 +340,7 @@ def add_all_alias_for_index(
     Args:
         cols: Column headers
         rows: Rows from the csv
-        read: Which read to get whitelist file for
+        all_aliases: All aliases from whitelist file for the given read
         col_name: Column name to add aliases for
         libraryStruct: Path to library structure json
         scaleplex_col_name: Column name to add scalePlex aliases for
@@ -370,14 +349,6 @@ def add_all_alias_for_index(
     Returns:
         List of rows with all aliases added
     """
-    # Parse lib json
-    with open(libraryStruct) as f:
-        libJson = json.load(f)
-
-    for barcode in libJson["barcodes"]:
-        if barcode["read"] == read:
-            all_aliases = pd.read_csv(libraryStruct.parent / barcode["sequences"], sep="\t", header=None)[0].to_list()
-
     rows_with_all_aliases = []
 
     for r in rows:
@@ -423,7 +394,9 @@ def main(
         samples_csv_fname: Name of the samples.csv file
         fastq_input: Flag to indicate that fastq files will be used as input to the workflow
     """
-    barcodes_range, sample_barcode_fname = get_barcodes_range(libraryStruct)
+    lib_json_obj = LibJsonParser(libraryStruct)
+    sample_barcode_whitelist_first_entry, sample_barcode_whitelist_second_entry = lib_json_obj.get_barcodes_range_of_whitelist_file(lib_json_obj.sample_barcode_fname)
+    barcodes_range = f"{sample_barcode_whitelist_first_entry}-{sample_barcode_whitelist_second_entry}"
     # Load column headers and all lines from the csv into lists
     cols, rows = readSamplesCsv(samplesCsv, quantum, fastq_input, reporting)
     # Process csv (add defaults, rename columns etc.)
@@ -440,9 +413,8 @@ def main(
                 rows = add_all_alias_for_index(
                     cols,
                     rows,
-                    "index2",
+                    lib_json_obj.all_whitelist_contents_by_read["index2"],
                     "libIndex2",
-                    libraryStruct,
                     "scalePlexLibIndex2" if scalePlex else None,
                     rna_to_scaleplex_mapping,
                 )
@@ -501,7 +473,7 @@ def main(
                 else:
                     r[barcodesIndex] = r[barcodesIndex].replace(" ", "")
                     all_samples_barcode_range[r[libNameIndex]].append(r[barcodesIndex])
-        check_whether_barcode_ranges_overlap(all_samples_barcode_range, sample_barcode_fname)
+        check_whether_barcode_ranges_overlap(all_samples_barcode_range, lib_json_obj.sample_barcode_fname)
         if splitFastq:
             if "split" not in cols:
                 cols.append("split")
@@ -562,7 +534,7 @@ def main(
         rows.extend(hash_rows)
         drop_hash_cols(cols, rows)
     if ultima:
-        write_unwrapped_barcodes_range_samples_csv(cols, rows, sample_barcode_fname)
+        write_unwrapped_barcodes_range_samples_csv(cols, rows, lib_json_obj.sample_barcode_fname)
     with open(samples_csv_fname, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)

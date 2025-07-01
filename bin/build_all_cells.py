@@ -12,6 +12,7 @@ import polars.selectors as cs
 import duckdb
 from pathlib import Path
 from scale_utils import io
+from scale_utils.lib_json_parser import LibJsonParser
 
 
 def read_genes(sample_specific_file_paths):
@@ -119,11 +120,6 @@ def count_transcripts(sample_specific_file_paths, features, barcodes, isBarnyard
         .fill_null(0)
     )  # for barcodes with no non-zero counts, fill in 0s
 
-    if isBarnyard:
-        # set counts and genes to max of human and mouse counts
-        all_cells = all_cells.with_columns(
-            counts=pl.max_horizontal(cs.ends_with("_counts")), genes=pl.max_horizontal(cs.ends_with("_genes"))
-        )
     return all_cells
 
 
@@ -168,7 +164,6 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
         (pl.col("genomeU") + pl.col("genomeM")).alias("mappedReads"),
         (pl.col("featureU") + pl.col("featureM")).alias("geneReads"),
         (pl.col("countedU") + pl.col("countedM")).alias("countedReads"),
-        (pl.lit(1) - pl.col("nUMIunique") / pl.col("countedU")).round(3).fill_nan(None).alias("Saturation"),
         (pl.col("mito") / (pl.col("genomeU") + pl.col("genomeM"))).round(3).fill_nan(None).alias("mitoProp"),
     )
     read_stats = read_stats.rename(
@@ -200,12 +195,12 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
         pl.col("antisenseReads"),
         pl.col("mitoReads"),
         pl.col("countedMultiGeneReads"),
-        pl.col("Saturation"),
+        (pl.lit(1) - pl.col("counts") / pl.col("countedReads")).round(3).fill_nan(None).alias("Saturation"),
         pl.col("mitoProp"),
     )
 
 
-def split_barcodes(lib_struct: Path, all_cells: pl.DataFrame, is_merge: bool) -> pd.DataFrame:
+def split_barcodes(lib_struct: Path, all_cells: pl.DataFrame) -> pd.DataFrame:
     """
     Splits cell barcodes into constituent aliases and add those columns to allCells.
 
@@ -216,14 +211,10 @@ def split_barcodes(lib_struct: Path, all_cells: pl.DataFrame, is_merge: bool) ->
     Returns:
         allCells DataFrame concatenated with the alias columns
     """
-    lib_json = io.readJSON(lib_struct, preserveDictOrder=True)
+    lib_json = LibJsonParser(lib_struct).json_contents
     barcode_info = lib_json["barcodes"]
     aliases = [bc["alias"] for bc in barcode_info if bc.get("type", None) not in ["library_index", "umi", "target"]]
     barcodes = all_cells["cell_id"]
-    # If the data is from samples that were merged.
-    # The sample ID needs to be removed from the CB before mapping to an alias.
-    if is_merge:
-        barcodes = barcodes.str.split("_").list.first()
     barcodes = barcodes.str.split("+").list.to_struct(fields=aliases).struct.unnest()
     bead_bc_cols = ["bead1", "bead2", "bead3"]
     if all([bc in aliases for bc in bead_bc_cols]):
@@ -272,14 +263,6 @@ def main():
         "--libStruct", type=Path, required=False, help="Path to the library structure json for this sample."
     )
 
-    # Optional argument to specify whether this is a merged workflow
-    parser.add_argument(
-        "--isMerge",
-        default=False,
-        action="store_true",
-        help="If set, workflow is merged, and sample names will be extracted from the group name.",
-    )
-
     args = parser.parse_args()
     mem_limit, mem_unit = args.memory.split()
     mem_limit = (
@@ -300,13 +283,8 @@ def main():
     allCells = build_allCells(sample_specific_file_paths, genes, barcodes, args.isBarnyard)
 
     if args.libStruct is not None:
-        allCells = split_barcodes(args.libStruct, allCells, args.isMerge)
-    # When this is a merged sample, the sample name is actually a "group" name;
-    # in order to get the correct sample name we extract it from the barcode
-    if args.isMerge:
-        allCells = allCells.with_columns(pl.col("cell_id").str.split("_").list.last().alias("sample"))
-    else:
-        allCells = allCells.with_columns(pl.lit(args.sample).alias("sample"))
+        allCells = split_barcodes(args.libStruct, allCells)
+    allCells = allCells.with_columns(pl.lit(args.sample).alias("sample"))
 
     metricsDir = Path(".", f"{args.sample}_metrics")
     metricsDir.mkdir(parents=True)

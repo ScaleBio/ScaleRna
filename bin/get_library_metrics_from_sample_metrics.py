@@ -30,6 +30,20 @@ def concat_sample_metrics(sample_metrics, libName):
     )
 
 
+def get_library_beads(sample_metrics, libName):
+    metricsDir = Path(".", f"library_{libName}_metrics")
+    metricsDir.mkdir(exist_ok=True)
+    duckdb.sql(
+        f"""
+    COPY (
+        SELECT bead_bc, CAST(SUM(counts) AS INTEGER) AS counts, CAST(SUM(CAST(pass AS INTEGER)) AS INTEGER) AS pass
+        FROM read_parquet({sample_metrics})
+        GROUP BY bead_bc
+    ) TO '{metricsDir}/libraryBeads.parquet';
+    """
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate metrics for library report")
     parser.add_argument(
@@ -38,10 +52,13 @@ def main():
     parser.add_argument(
         "--libName", type=str, help="libName specified in passed samplesheet for which to generate a fastq report"
     )
+    parser.add_argument("--beadMetrics", action="store_true", default=False)
 
     args = parser.parse_args()
 
     concat_sample_metrics(args.sample_metrics, args.libName)
+    if args.beadMetrics:
+        get_library_beads(args.sample_metrics, args.libName)
 
 
 if __name__ == "__main__":

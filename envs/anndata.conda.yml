@@ -1,7 +1,7 @@
 name: anndata
 channels:
   - conda-forge
-  - defaults
+  - nodefaults
 dependencies:
   - pandas=2.2.3
   - h5py=3.12.1

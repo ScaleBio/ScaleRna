@@ -10,38 +10,11 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import polars.selectors as cs
-import json
 from scipy.sparse import csr_array, csc_array, hstack
 from scipy.io import mmwrite, mmread
 from scipy.stats import poisson
 from scipy.stats import false_discovery_control
-
-
-@dataclass
-class Metrics:
-    """Overall sample statistics"""
-
-    meanReadsPerCell: int = 0  # number of reads per cell. Should be multiplied by correct for ~usable amount
-    nUMIPerCell: int = 0  # median number of HASH UMI molecules per cell
-    passingPercent: int = 0  # percent of cells that had at least thresh Guide UMI's detected
-    maxFailPercent: int = 0  # percent of cells with maxFail assignment
-    enrichFailPercent: int = 0  # percent of cells with enrichFail assignment
-    indeterminatePercent: int = 0
-    unexpectedPercent: int = 0
-    saturation: int = 0  # median saturation of cells
-    readsInCells: int = 0  # percent of hash reads that ended up in called cells
-
-    def print(self, outFn: Path):
-        with open(outFn, "w") as out:
-            print("ReadsPerCell", f"{self.meanReadsPerCell:}", sep=",", file=out)
-            print("nUMIPerCell", f"{self.nUMIPerCell:}", sep=",", file=out)
-            print("passingPercent", f"{self.passingPercent:.1%}", sep=",", file=out)
-            print("maxFailPercent", f"{self.maxFailPercent:.1%}", sep=",", file=out)
-            print("enrichFailPercent", f"{self.enrichFailPercent:.1%}", sep=",", file=out)
-            print("indeterminatePercent", f"{self.indeterminatePercent:.1%}", sep=",", file=out)
-            print("unexpectedPercent", f"{self.unexpectedPercent:.1%}", sep=",", file=out)
-            print("saturation", f"{self.saturation:.1%}", sep=",", file=out)
-            print("readsInCells", f"{self.readsInCells:.1%}", sep=",", file=out)
+from scale_utils.lib_json_parser import LibJsonParser
 
 
 @dataclass(frozen=True)
@@ -63,18 +36,22 @@ codes = AssignmentCodes()
 
 def preprocessJson(libStructJson: Path):
     """Get file with scaleplex sequences and mapping of scaleplex combos to fixation plate well"""
-    libStruct = json.load(open(libStructJson))
-    for bc in libStruct["barcodes"]:
+    lib_json_obj = LibJsonParser(libStructJson)
+    for bc in lib_json_obj.json_contents["barcodes"]:
         if bc.get("name") in ["scaleplex"]:
             guide_file = bc.get("sequences")
             hash_combos = bc.get("mapping")
     aliases = [
-        bc["alias"] for bc in libStruct["barcodes"] if bc.get("type", None) not in ["library_index", "umi", "target"]
+        bc["alias"]
+        for bc in lib_json_obj.json_contents["barcodes"]
+        if bc.get("type", None) not in ["library_index", "umi", "target"]
     ]
     bead_bc_cols = ["bead1", "bead2", "bead3"]
     if all([bc in aliases for bc in bead_bc_cols]):
         bead_bc_cols_to_drop = [
-            bc.get("alias") for bc in libStruct["barcodes"] if bc.get("alias") in bead_bc_cols and not bc.get("plate")
+            bc.get("alias")
+            for bc in lib_json_obj.json_contents["barcodes"]
+            if bc.get("alias") in bead_bc_cols and not bc.get("plate")
         ]
         aliases = [bc for bc in aliases if bc not in bead_bc_cols_to_drop]
 
@@ -161,11 +138,13 @@ def write_keys_to_tsv(dictionary, tsv_file):
             writer.writerow([key])
 
 
-def compute_background_series(mtx, top_n=2):
+def compute_background_series(mtx, min_cell_thresh, min_background_val, top_n=2):
     """Builds background estimation per hash,
     where background is considered to be any non-zero and non-top n values per cell per hash
     Args:
         sparse_matrix: filtered hashes x cells UMI counts matrix
+        min_cell_thresh: fraction of cells in which a background count needs to be observed per oligo to be considered in estimation
+        min_background_val: value set in background estimation if scaleplex oligo fails min_cell_thresh check
         top_n: number of top values within each cell (column) to ignore when estimating background.
     """
     background = np.zeros(mtx.shape[0])
@@ -182,7 +161,9 @@ def compute_background_series(mtx, top_n=2):
         row_arr = mtx[[row_idx], :].toarray().ravel().astype(float)
         row_arr[(row_arr >= nth_val) | (row_arr == 0)] = np.nan
         # compute median of counts for this hash excluding cells where it was zero or a top n hash
-        background[row_idx] = 0 if np.all(np.isnan(row_arr)) else np.nanmedian(row_arr)
+        min_cells = mtx.shape[1] * min_cell_thresh # calculate min n cells a bg count needs to occur in
+        bg_counts = sum(~np.isnan(row_arr)) # number of cells a bg count takes place in
+        background[row_idx] = min_background_val if bg_counts < min_cells else np.nanmedian(row_arr) # set bg to zero for oligo if too few bg counts, otherwise median
     return background
 
 
@@ -244,22 +225,28 @@ def assignment_criteria_fc(row, hash_well_dict, fc_threshold):
 
 
 def hash_assignment(
-    sparse_matrix, cell_stats, features_dict, assignment_method, toptwo_frac, hash_well_dict, fc_threshold
+    sparse_matrix, cell_stats, features_dict, assignment_method, toptwo_frac, hash_well_dict, fc_threshold, min_cell_percent, min_background_count
 ):
     """Creates a list of guides (columns) that passed the minimum UMI threshold within each cell"""
     assignment_df = pd.DataFrame(index=cell_stats.index)
-    if assignment_method == "bg":
-        background = compute_background_series(sparse_matrix, top_n=2)
-        passing_hashes_df = corrected_p_values_poisson(sparse_matrix, background, features_dict, 0.05)
-        assignment_df["passing_scaleplex"] = passing_hashes_df["passing_scaleplex"].values
-        assignment_df["assigned_scaleplex"] = cell_stats.join(assignment_df).apply(
-            assignment_criteria_bg, axis=1, hash_well_dict=hash_well_dict, toptwo_frac=toptwo_frac
-        )
-    # Iterate over rows
-    if assignment_method == "fc":
-        assignment_df["assigned_scaleplex"] = cell_stats.apply(
-            assignment_criteria_fc, axis=1, hash_well_dict=hash_well_dict, fc_threshold=fc_threshold
-        )
+    if not assignment_df.index.empty:
+        if assignment_method == "bg":
+            background = compute_background_series(sparse_matrix, min_cell_percent, min_background_count, top_n=2)
+            passing_hashes_df = corrected_p_values_poisson(sparse_matrix, background, features_dict, 0.05)
+            assignment_df["passing_scaleplex"] = passing_hashes_df["passing_scaleplex"].values
+            assignment_df["assigned_scaleplex"] = cell_stats.join(assignment_df).apply(
+                assignment_criteria_bg, axis=1, hash_well_dict=hash_well_dict, toptwo_frac=toptwo_frac
+            )
+        # Iterate over rows
+        if assignment_method == "fc":
+            assignment_df["assigned_scaleplex"] = cell_stats.apply(
+                assignment_criteria_fc, axis=1, hash_well_dict=hash_well_dict, fc_threshold=fc_threshold
+            )
+    else:
+        # Add a column for passing_scaleplex to enable merge with non-empty allCells.csv
+        if assignment_method == "bg":
+            assignment_df["passing_scaleplex"] = "No_Pass"
+        assignment_df["assigned_scaleplex"] = codes.indeterminate
 
     return pl.DataFrame(assignment_df.reset_index())
 
@@ -273,12 +260,13 @@ def main(
     assignment_method: str,
     toptwo_frac: float,
     fc_threshold: float,
+    min_cell_count_bg: float,
+    min_bg_scaleplex_count: float,
     expected_combos: str,
     id: str,
     out_dir: Path,
 ):
 
-    metrics = Metrics()
     hash_combos, guide_file, aliases = preprocessJson(lib_struct)
 
     guide_matrix = mmread(umi_matrix)
@@ -322,6 +310,8 @@ def main(
         toptwo_frac,
         hash_well_dict,
         fc_threshold,
+        min_cell_count_bg,
+        min_bg_scaleplex_count,
     )  # hash assignemt of any hash that are = max UMI value for that cell
     cell_stats_passing = cell_stats_passing.join(assignment_df, how="left", on="cell_id")
     cell_stats_passing = cell_stats_passing.rename({"cell_id": "Cell_Barcode"})
@@ -355,38 +345,6 @@ def main(
     )  # add assignment for RNA passing cells
     # save allCells with scaleplex assignment
     assigned_cells.to_csv(out_dir / f"{id}_allCellsWithAssignment.csv")
-    assigned_cells = assigned_cells[
-        ~assigned_cells["assigned_scaleplex"].isin(codes.errors)
-    ]  # remove cells with assignment errors
-    scaleplex_stats = (
-        assigned_cells.groupby("assigned_scaleplex")
-        .agg(
-            passing_reads=("totalReads", "sum"),
-            cells_called=("assigned_scaleplex", "size"),
-            mean_passing_reads=("totalReads", "mean"),
-            median_utc=("counts", "median"),
-            median_genes=("genes", "median"),
-        )
-        .sort_values(["cells_called", "passing_reads"], ascending=False)
-        .astype("int")
-    )
-    scaleplex_stats.to_csv(out_dir / f"{id}.scaleplex_stats.csv")
-
-    cell_stats_passing = cell_stats_passing.to_pandas().set_index("Cell_Barcode")
-    metrics.meanReadsPerCell = round(cell_stats_passing["totalReads"].mean(0), 1)
-    metrics.nUMIPerCell = round(cell_stats_passing["counts"].median(0), 1)
-    metrics.saturation = round(cell_stats_passing["Saturation"].median(0), 1)
-    metrics.readsInCells = cell_stats_passing["totalReads"].sum() / cell_stats_df["totalReads"].sum()
-
-    assignment_prop = cell_stats_passing["assigned_scaleplex"].value_counts(normalize=True)
-    metrics.passingPercent = assignment_prop.drop(codes.errors, errors="ignore").sum()
-    # Report out different assignment error stats
-    metrics.indeterminatePercent = assignment_prop[codes.indeterminate] if codes.indeterminate in assignment_prop else 0
-    metrics.maxFailPercent = assignment_prop[codes.max_fail] if codes.max_fail in assignment_prop else 0
-    metrics.enrichFailPercent = assignment_prop[codes.enrich_fail] if codes.enrich_fail in assignment_prop else 0
-    metrics.unexpectedPercent = assignment_prop[codes.unexpected] if codes.unexpected in assignment_prop else 0
-
-    metrics.print(out_dir / "metrics.csv")
 
     # write features.tsv
     write_keys_to_tsv(guide_dict, f"{matrix_dir}/features.tsv.gz")
@@ -439,6 +397,18 @@ if __name__ == "__main__":
         "--fc_threshold", metavar="FC_THRESHOLD", type=float, help="FC threshold for fold change based assignment"
     )
     parser.add_argument(
+        "--min_cell_count_bg", 
+        metavar="MIN_CELL_COUNT_BG", 
+        type=float,
+        help="Fraction of cells that an oligo needs background counts in for consideration"
+    )
+    parser.add_argument(
+        "--min_bg_scaleplex_count", 
+        metavar="MIN_BG_SCALEPLEX_COUNT", 
+        type=float,
+        help="Minimum value set in the background estimation for an oligo if it fails min_cell_count_bg check"
+    )
+    parser.add_argument(
         "--expected_combos",
         metavar="FIXATION_PLATE_WELLS",
         type=str,
@@ -457,6 +427,8 @@ if __name__ == "__main__":
         args.assignment_method,
         args.toptwo_frac,
         args.fc_threshold,
+        args.min_cell_count_bg,
+        args.min_bg_scaleplex_count,
         args.expected_combos,
         args.id,
         args.outDir,

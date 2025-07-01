@@ -30,8 +30,12 @@ class ParamLogger {
                 params.outputDir = uriOutDir.resolve(uriFastqDirName+"/").resolve(workflow.runName+"/").toString()
             }
             if (params.reporting) {
-                def uriResultDirName = params.resultDir.tokenize("/").last()
-                params.outputDir = uriOutDir.resolve(uriResultDirName+"/").resolve(workflow.runName+"/").toString()
+                if (params.resultDir) {
+                    def uriResultDirName = params.resultDir.tokenize("/").last()
+                    params.outputDir = uriOutDir.resolve(uriResultDirName+"/").resolve(workflow.runName+"/").toString()
+                } else {
+                    params.outputDir = uriOutDir.resolve(workflow.runName+"/").toString()
+                }
             }
             if (params.ultimaCramDir) {
                 def uriUltimaCramDirName = params.ultimaCramDir.tokenize("/").last()
@@ -84,17 +88,14 @@ class ParamLogger {
                                   'libStructure',
                                   'merge',
                                   'splitFastq',
-                                  'quantum',
                                   'bclConvertParams',
                                   'fastqc',
                                   'starFeature',
                                   'starMulti',
                                   'starMultiBarnyard',
                                   'starStrand',
-                                  'trimFastq',
                                   'computeOutDir',
                                   'trimAdapt',
-                                  'scalePlexTrimAdapt',
                                   'starTrimming',
                                   'minUTC',
                                   'min-UTC',
@@ -104,6 +105,7 @@ class ParamLogger {
                                   'taskMaxMemory',
                                   'taskMaxCpus',
                                   'taskMaxTime',
+                                  'testRun',
                                   'seurat',
                                   'azimuth',
                                   'scale-plex-FCThreshold',
@@ -116,6 +118,7 @@ class ParamLogger {
                                   'useSTARthreshold',
                                   'use-STARthreshold',
                                   'cellFinderFdr',
+                                  'medianFraction',
                                   'filterOutliers',
                                   'madsReads',
                                   'starMaxLoci',
@@ -129,24 +132,23 @@ class ParamLogger {
                                   'scalePlexPercentFromTopTwo',
                                   'scalePlexFCThreshold',
                                   'scalePlexMinReadUmi',
-                                  'trimAdapt3L',
-                                  'trim-adapt3L',
-                                  'trimAdaptQuantum',
-                                  'trimAdaptQuantumScalePlex',
+                                  'scalePlexMinCellCountBG',
+                                  'scalePlexMinBGVal',
                                   'outputDir',
                                   'starMultiBarnyard',
                                   'starJobsPerSample',
                                   'bcParserJobsPerLibName',
                                   'ultimaCramDir',
-                                  'filterBeads',
-                                  'maxBeadBcs',
+                                  'filterAmbientBeads',
+                                  'minBeadDivergence',
                                   'scalePlexToRnaMapping',
-                                  'cramFilePattern',
                                   'roundCounts',
                                   'totalFastqcJobs',
                                   'rtBarcodesPerStarJob',
+                                  'index2Min-file-size',
                                   'index2MinFileSize',
-                                  'minPassingSampleReads']
+                                  'minPassingSampleReads',
+                                  'filesPerLibDetection']
         def master_list_of_params = allowed_parameters
         allowed_parameters.each { str ->
             master_list_of_params += camelToKebab(str)}
@@ -162,25 +164,28 @@ class ParamLogger {
             checkArg(params.getProperty(param), param)
         }
         if (params.samples == null || params.samples == true) {
-            throwError("Must specify --samples (e.g. samples.csv)")
+            throwError("Must specify --samples <samples.csv>")
         }
         if (params.fastqDir && params.runFolder) {
             throwError("Cannot specify both --runFolder and --fastqDir")
         }
         if (params.libStructure == null || params.libStructure == true) {
-            throwError("Must specify --libStructure (e.g. libV1.1.json)")
+            throwError("Must specify --libStructure <libQuantumV1.0.json>")
         }
         if (params.genome == null || params.genome == true) {
-            throwError("Must specify --genome")
+            throwError("Must specify --genome <genome.json>")
         }
         if (params.reporting) {
             if (params.runFolder || params.fastqDir) {
                 throwError("Cannot specify --runFolder or --fastqDir when running reporting-only (--reporting)")
             }
         }
-        if (params.quantum && params.scalePlex) {
-            if (params.scalePlexLibStructure == "scaleplexlibV1.json") {
-                throwError("Specify correct --scalePlexLibStructure (scaleplexlibQuantumV1.json) when running quantum data")
+        if (!params.testRun && !params.reporting) { // Allow reporting and small test-runs with less resources
+            if (params.taskMaxCpus < 8) {
+                throwError("At least 8 CPUs are required for this workflow (more for full datasets). Please increase --taskMaxCpus")
+            }
+            if (params.taskMaxMemory as nextflow.util.MemoryUnit < 30.GB) {
+                throwError("At least 30 GB of memory is required for this workflow (more for full datasets). Please increase --taskMaxMemory")
             }
         }
     }
@@ -224,7 +229,6 @@ class ParamLogger {
             input_opts['scalePlexLibStructure'] = params.scalePlexLibStructure
         }
 
-        workflow_opts['trimFastq'] = params.trimFastq
         workflow_opts['starFeature'] = params.starFeature
         workflow_opts['starMulti'] = params.starMulti
         if (params.scalePlex) {

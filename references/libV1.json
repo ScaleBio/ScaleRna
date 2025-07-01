@@ -14,5 +14,7 @@
         "library_barcodes": {},
         "split_on": "index1",
         "index1Seqs": "3lvlRNA_pcr.txt"
-    }
+    },
+    "quantum": false,
+    "trimAdapter": "-a A{8}N{100} -a T{8}N{100}"
 }

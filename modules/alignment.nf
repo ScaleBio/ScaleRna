@@ -1,9 +1,6 @@
 /*
 * Perform alignment of demultiplexed reads using STAR
 *
-* Processes:
-*     StarSolo
-*     MergeStar
 */
 
 // Run the STAR executable on demuxed bam files
@@ -54,12 +51,13 @@ process StarSolo {
 	matrixFn = Utils.starMatrixFn(starMultiParam)
 	ubam_files = demuxed_ubam.join(',')
 	"""
-	STAR --runThreadN $task.cpus --genomeDir $indexDir --soloType CB_UMI_Simple --soloBarcodeReadLength 0 --soloCBwhitelist None --soloCBtype String $bamOpts --outSJtype None\
+	STAR --runThreadN ${[task.cpus - 2, 1].max()} --genomeDir $indexDir --soloType CB_UMI_Simple --soloBarcodeReadLength 0 --soloCBwhitelist None --soloCBtype String $bamOpts --outSJtype None\
 	--soloCellReadStats Standard --soloStrand $strand ${params.starTrimming} --soloFeatures ${params.starFeature} --soloMultiMappers $starMultiParam --readFilesIn $ubam_files\
 	--readFilesType SAM SE --readFilesCommand samtools view --soloInputSAMattrBarcodeSeq CB UM --soloCellFilter None --outFilterMultimapNmax ${params.starMaxLoci}
 	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/$matrixFn
 	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/barcodes.tsv
 	pigz -p $task.cpus Solo.out/${params.starFeature}/raw/features.tsv
+	( [ -n "\${AWS_BATCH_JOB_ID:-}" ] && pgrep -f "samtools" | xargs -r kill ) || true
 	"""
 }
 

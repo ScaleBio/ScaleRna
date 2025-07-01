@@ -1,4 +1,18 @@
 import numpy as np
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class OutlierOptions:
+    """
+    Options for flagging / filtering cell outliers based on QC metrics
+    """
+
+    filter_outliers: bool
+    reads_mads: float
+    passing_mads: float
+    mito_mads: float
+    mito_min_thres: float = 0.05
 
 
 def coverage_equation(x, c, n):
@@ -64,7 +78,12 @@ def extrapolate_unique(reads: int, umis: int, targetReads: int) -> float:
     return int(res) if not np.isnan(res) else res
 
 
-def calculate_weighted_average(weights: list, values: list, precision: int, msg = "No passing reads. Please check your sample table or input runfolder / fastq files") -> float:
+def calculate_weighted_average(
+    weights: list,
+    values: list,
+    precision: int,
+    msg="No passing reads. Please check your sample table or input runfolder / fastq files",
+) -> float:
     """
     Calculate the weighted average of a list of values
 

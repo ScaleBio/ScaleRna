@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap, SymLogNorm
 import plotly.graph_objects as go
+from .lib_json_parser import LibJsonParser
 
 
 # Plotly express figure style to be used for all figures
@@ -184,29 +185,6 @@ def wellStringComp(x: str, y: str) -> bool:
     return (xNum, xLetter) < (yNum, yLetter)
 
 
-def getMaxWellNumberAndLetter(fname):
-    """
-    Get maximum well coordinate from reference file
-
-    Args:
-        fname (str): Path to file
-
-    Returns:
-        Maximum letter and maximum number corresponding to the max well coordinate
-    """
-    max_letter = "A"
-    max_number = 1
-    with open(fname) as f:
-        for line in f:
-            line = line.strip()
-            split_line = line.split("\t")
-            letter = split_line[0][-1]
-            numbers = int(split_line[0][:-1])
-            max_letter = letter if letter > max_letter else max_letter
-            max_number = numbers if numbers > max_number else max_number
-    return max_letter, max_number
-
-
 def getCharacterIndices(lower_limit: int, upper_limit: int) -> List[chr]:
     """
     Generate a list of letter indices from a range of ascii values
@@ -296,15 +274,15 @@ def buildPlatePlot(counts, title, threshold, what="Cells", subtitle=""):
     return fig
 
 
-def buildDfForSamplePlatePlot(libJson, index, referencesPath):
+def buildDfForSamplePlatePlot(lib_json_obj: LibJsonParser, index: str):
     well_dict = {}
     lib_json_entry_dict = None
-    for entry in libJson["barcodes"]:
+    for entry in lib_json_obj.json_contents["barcodes"]:
         if "alias" in entry:
             if entry["alias"] == index.split("_")[0]:
                 lib_json_entry_dict = entry
     assert lib_json_entry_dict is not None, f"Could not find barcode {index.split('_')[0]} in libJson"
-    max_letter, max_number = getMaxWellNumberAndLetter(referencesPath / f'{lib_json_entry_dict["sequences"]}')
+    max_letter, max_number = lib_json_obj.getMaxWellNumberAndLetter(lib_json_obj.parent_dir / f'{lib_json_entry_dict["sequences"]}')
     wellPlateCellCountDf = pd.DataFrame(
         0, columns=range(1, max_number + 1), index=getCharacterIndices(65, ord(max_letter) + 1)
     )
@@ -317,8 +295,7 @@ def buildDfForSamplePlatePlot(libJson, index, referencesPath):
 
 
 def barcodeLevelPlots(
-    libJson: dict,
-    libStructDir: Path,
+    lib_json_obj: LibJsonParser,
     sampleId: str,
     cells: pd.DataFrame,
     index: str,
@@ -331,6 +308,8 @@ def barcodeLevelPlots(
     displaying statistics on a per well basis
 
     Args:
+        lib_json_obj: Object containing library structure information
+        sampleId: Identifying information for sample
         cells: Metrics per cell-barcode
         index: Column name to sort dataframe by
         title: Title of the plot
@@ -340,11 +319,11 @@ def barcodeLevelPlots(
     Returns:
         dp.Group object containing all the plots
     """
-    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(libJson, index, libStructDir)
+    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(lib_json_obj, index)
 
     num_cells_dict = cells[index].value_counts().to_dict()
 
-    for idx, row in cells.iterrows():
+    for _idx, row in cells.iterrows():
         letter = row[index][-1]
         numbers = row[index][:-1]
         try:

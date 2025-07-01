@@ -1,0 +1,13 @@
+{
+"barcodes" : [
+    {"read": "index2", "name": "PCR", "sequences": "quantum_scaleplex_pcr_ultima.txt", "alias":"PCR", "cram_tag": "RG"},
+    {"read": "index1", "name": "bead1", "sequences": "quantum_bead_barcode1.txt", "alias":"bead1", "cram_tag": "b1"},
+    {"read": "index1", "name": "bead2", "sequences": "quantum_bead_barcode2.txt", "alias":"bead2", "cram_tag": "b2"},
+    {"read": "index1", "name": "bead3", "sequences": "quantum_bead_barcode3.txt", "alias":"bead3", "cram_tag": "b3"},
+    {"read": "read2", "name": "RT", "sequences": "quantum_rt.txt", "alias":"RT", "plate":true, "cram_tag": "b4"},
+    {"read": "read1", "name": "scaleplex", "type": "target", "sequences": "scaleplex.txt", "mapping": "fixation.txt", "alias":"scaleplex", "cram_tag": "sp"},
+    {"read": "read2", "name": "umi", "type": "umi"}
+],
+"scaleplex_to_rna_mapping": "scaleplex_to_rna_mapping.txt",
+"sample_barcode":"RT"
+}

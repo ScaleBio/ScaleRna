@@ -3,7 +3,7 @@ Implementation of a statistical method to classify cell and background barcodes,
 """
 
 import sys
-from typing import Optional
+from typing import Any
 import numpy as np
 import pandas as pd
 from scipy.stats import dirichlet_multinomial, false_discovery_control
@@ -47,7 +47,7 @@ def interpolate_unseen_species(smoothed_probabilities: np.ndarray, gene_sums: np
 
 def construct_ambient_profile(gene_count_vector: np.ndarray, gene_sums: np.ndarray) -> np.ndarray:
     """
-    (Subroutine of call_cells). Constructs a proportion vector representing the ambient profile.
+    Constructs a proportion vector representing the ambient profile.
     Applies the Good-Turing algorithm to the summed unique transcript count vector of all ambient barcodes
     to obtain a posterior expectation for the representation of each gene among those barcodes.
 
@@ -125,7 +125,28 @@ def estimate_alpha(
     return alpha
 
 
-def rescue_cells(
+def compute_ambiguous_likelihoods(
+    con: duckdb.DuckDBPyConnection,
+    chunk: np.ndarray,
+    nzgenes: np.ndarray,
+    scaled_ambient_profile: np.ndarray
+) -> np.ndarray:
+    """
+    Compute likelihoods for a chunk of ambiguous barcodes.
+    """
+    discrete_mtx = io.load_partial_mtx(con, chunk)
+    discrete_mtx = sp.csr_array(discrete_mtx)[nzgenes, :]  # get the subset of genes
+    discrete_mtx = sp.csc_array(discrete_mtx)[:, chunk]  # get the subset of barcodes
+    discrete_mtx.data = np.round(discrete_mtx.data)
+    split_mtx = discrete_mtx.toarray().transpose()
+    lls = [
+        dirichlet_multinomial.logpmf(split_mtx[i, :], [scaled_ambient_profile], split_mtx[i, :].sum())
+        for i in range(split_mtx.shape[0])
+    ]
+    return np.array(lls).ravel()  # convert nested lists to flat array
+
+
+def test_ambiguous_barcodes(
     con: duckdb.DuckDBPyConnection,
     scaled_ambient_profile: np.ndarray,
     alpha: float,
@@ -134,8 +155,8 @@ def rescue_cells(
     mcvecs: int = 10000,
 ) -> np.ndarray:
     """
-    (Subroutine of test_ambiguous_barcodes). Tests each ambiguous barcode for deviation
-    from the ambient profile. 10,000 count vectors are sampled from the ambient profile
+    Tests each ambiguous barcode for deviation from the ambient profile.
+    10,000 count vectors are sampled from the ambient profile
     under the Dirichlet multinomial distribution, and the likelihood of each sampled
     ambient count vector is compared with the likelihood of each ambiguous barcode under
     the same distribution. A Monte Carlo p-value is computed for each ambiguous barcode
@@ -164,23 +185,12 @@ def rescue_cells(
     unique_total_count = unique_total_counts_by_ambiguous_barcode[0]
 
     # Calculate likelihood of all ambiguous barcode, split into dense matrix chunks for memory efficiency
-    ambiguous_barcode_likelihoods = []
     chunk_size = 10000
     barcode_chunks = np.array_split(ambiguous_barcode_indices, np.ceil(len(ambiguous_barcode_indices) / chunk_size))
-    for chunk in barcode_chunks:
-        discrete_mtx = io.load_partial_mtx(con, chunk)
-        discrete_mtx = sp.csr_array(discrete_mtx)[nzgenes, :]  # get the subset of genes
-        discrete_mtx = sp.csc_array(discrete_mtx)[:, chunk]  # get the subset of barcodes
-        discrete_mtx.data = np.round(discrete_mtx.data)
-        split_mtx = discrete_mtx.toarray().transpose()
-        lls = [
-            dirichlet_multinomial.logpmf(split_mtx[i, :], [scaled_ambient_profile], split_mtx[i, :].sum())
-            for i in range(split_mtx.shape[0])
-        ]
-        lls = np.array(lls).ravel()  # convert list to flat array
-        ambiguous_barcode_likelihoods.append(lls)
-    ambiguous_barcode_likelihoods = np.concatenate(ambiguous_barcode_likelihoods)
-    del split_mtx  # remove reference to split_mtx to free memory
+    ambiguous_barcode_likelihoods = np.concatenate([
+        compute_ambiguous_likelihoods(con, chunk, nzgenes, scaled_ambient_profile)
+        for chunk in barcode_chunks
+    ])
 
     # Sample 10,000 vectors from the ambient profile, each with a starting sum of the lowest total unique transcript count above minUTC
     dirichlet_probability_vectors = RNG.dirichlet(alpha=scaled_ambient_profile, size=mcvecs)
@@ -221,52 +231,7 @@ def rescue_cells(
     return monte_carlo_p_values
 
 
-def test_ambiguous_barcodes(
-    con: duckdb.DuckDBPyConnection,
-    nzgenes: np.ndarray,
-    all_indices: np.ndarray,
-    ambient_bc_sums: np.ndarray,
-    ambient_profile: np.ndarray,
-    ambient_barcodes: np.ndarray,
-    ambiguous_barcodes: np.ndarray,
-    alpha: Optional[float] = 0,
-) -> np.ndarray:
-    """
-    (Subroutine of call_cells). Tests all ambiguous barcodes with unique
-    transcript counts >= minUTC and < UTC for deviation from the ambient
-    profile. If barcodes deviate at the specified FDR from the ambient profile
-    under the Dirichlet multinomial distribution, they are rescued as cells;
-
-    Args:
-        con: duckdb connection with existing mtx and mtx_metadata tables
-        nzgenes: Subset of genes with nonzero counts
-        all_indices: Array of all indices for this subset of the mtx
-        ambient_bc_sums: Array of summed unique transcript counts for each ambient barcode
-        ambient_profile: Array of posterior expectations for the proportion of counts (summing to 1) assigned to each gene in the ambient profile
-        ambient_barcodes: Boolean array indicating which barcodes are ambient
-        ambiguous_barcodes: Boolean array indicating which barcodes are ambiguous
-
-    Returns:
-        An array of Monte Carlo p-values indicating each ambiguous barcode's degree of deviation from the ambient profile,
-        corrected for multiple testing by the Benjamini-Hochberg procedure
-    """
-    FDRs = []
-
-    # Scale the ambient profile by the estimated scaling factor alpha for the Dirichlet multinomial distribution
-    if not alpha:
-        alpha = estimate_alpha(ambient_bc_sums, ambient_profile, ambient_barcodes, nzgenes, all_indices, con)
-    scaled_ambient_profile = alpha * ambient_profile
-
-    # Test each ambiguous barcode for deviation from the ambient profile, obtaining a Monte Carlo p-value for each
-    monte_carlo_p_values = rescue_cells(con, scaled_ambient_profile, alpha, nzgenes, all_indices[ambiguous_barcodes])
-
-    # Adjust p-values for multiple testing using the Benjamini-Hochberg procedure
-    FDRs = false_discovery_control(monte_carlo_p_values, method="bh")
-
-    return FDRs
-
-
-def interpolate_gene_counts(gene_count_counts: dict[float:int]) -> dict[int:float]:
+def interpolate_gene_counts(gene_count_counts: dict[float, int]) -> dict[int, float]:
     """
     (Subroutine of the Good-Turing algorithm used in construct_ambient_profile).
     For each count b, obtains the linear interpolation of b given a, c,
@@ -294,7 +259,7 @@ def interpolate_gene_counts(gene_count_counts: dict[float:int]) -> dict[int:floa
     return linear_interpolations
 
 
-def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[float:int]) -> np.ndarray:
+def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[float, int]) -> np.ndarray:
     """
     (Subroutine of the Good-Turing algorithm used in construct_ambient_profile). For each gene, calculates the smoothed probability of encountering that gene among ambient barcodes given the contingent possibility of encountering genes not seen at all among those barcodes.
 
@@ -352,3 +317,59 @@ def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[
     )
 
     return smoothed_probabilities
+
+
+def rescue_cells(
+    con: duckdb.DuckDBPyConnection,
+    nzgenes: np.ndarray,
+    all_indices: np.ndarray,
+    ambient_bc_sums: np.ndarray,
+    ambient_gene_sums: np.ndarray,
+    gene_sums: np.ndarray,
+    ambient_barcodes: np.ndarray,
+    ambiguous_barcodes: np.ndarray,
+    alpha: float = 0,
+    num_cells: int = 0,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """
+    Main CellFinder entry point.
+    Tests all ambiguous barcodes with unique transcript counts >= minUTC and < UTC for deviation from the ambient
+    profile. If barcodes deviate at the specified FDR from the ambient profile
+    under the Dirichlet multinomial distribution, they are rescued as cells
+
+    Args:
+        con: duckdb connection with existing mtx and mtx_metadata tables
+        nzgenes: Subset of genes with nonzero counts
+        all_indices: Array of all indices for this subset of the mtx
+        ambient_bc_sums: Array of summed unique transcript counts for each ambient barcode
+        ambient_profile: Array of posterior expectations for the proportion of counts (summing to 1) assigned to each gene in the ambient profile
+        ambient_barcodes: Boolean array indicating which barcodes are ambient
+        ambiguous_barcodes: Boolean array indicating which barcodes are ambiguous
+        alpha: The overdispersion of the background distribution. Can be fixed or estimated from data
+        num_cells: Already called (highly confident) cells in the dataset, included in FDR correction
+
+    Returns:
+        An array of Monte Carlo p-values indicating each ambiguous barcode's degree of deviation from the ambient profile,
+        corrected for multiple testing by the Benjamini-Hochberg procedure
+        A dictionary of metrics from the procedure
+    """
+    FDRs = []
+    stats = {}
+
+    ambient_profile = construct_ambient_profile(ambient_gene_sums, gene_sums)
+    if not alpha:
+        alpha = estimate_alpha(ambient_bc_sums, ambient_profile, ambient_barcodes, nzgenes, all_indices, con)
+    stats['alpha'] = alpha
+    # Scale the ambient profile by the estimated overdispersion alpha for the Dirichlet multinomial distribution
+    scaled_ambient_profile = alpha * ambient_profile
+
+    # Test each ambiguous barcode for deviation from the ambient profile, obtaining a Monte Carlo p-value for each
+    monte_carlo_p_values = test_ambiguous_barcodes(con, scaled_ambient_profile, alpha, nzgenes, all_indices[ambiguous_barcodes])
+    stats['min_pval'] = monte_carlo_p_values.min()
+
+    # Multiple testing correction
+    # Insert p=0 for all previously called certain cells
+    pvals = np.concatenate((np.zeros(num_cells), monte_carlo_p_values))
+    FDRs = false_discovery_control(pvals, method="bh")
+
+    return FDRs[num_cells:], stats

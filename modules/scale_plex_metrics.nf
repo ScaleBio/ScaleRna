@@ -1,8 +1,6 @@
 /**
 * Use RNA passing cells and hash UMI matrix to generate metrics and filtered UMI matrix
 *
-* Processes:
-*     MetricsGeneration
 */
 
 process MetricsGeneration {
@@ -14,7 +12,6 @@ process MetricsGeneration {
     publishDir { file(params.outputDir) / "scaleplex" / "${id}.raw.matrix" }, pattern: "matrix.mtx.gz", mode: 'copy'
     publishDir { file(params.outputDir) / "scaleplex" }, pattern: "${id}.cellMetrics.parquet", mode: 'copy'
 	publishDir { file(params.outputDir) / samplesDir }, pattern: "${id}_allCellsWithAssignment.csv", mode: 'copy', saveAs: { meta.lib == "merged" ? "${rnaId}.merged.allCells.csv" : "${rnaId}.allCells.csv" }
-    publishDir { file(params.outputDir) / reportDir / "csv" }, pattern: "${id}.scaleplex_stats.csv", mode: 'copy'
 
     input:
     path(libStructDir) // Directory containing the library structure definition
@@ -22,12 +19,12 @@ process MetricsGeneration {
     tuple val(meta), path(cellMetrics), path('matrix.mtx.gz'), path(allCells), val(libCount)
 
     output:
-    tuple val(meta), path("${id}.ScalePlex.allBarcodes.parquet"), path("${id}.filtered.matrix"), path("${id}.scaleplex_stats.csv"), path("metrics.csv"), emit: metrics
+    tuple val(meta), path("${id}.ScalePlex.allBarcodes.parquet"), path("${id}.filtered.matrix"), emit: metrics
     tuple val(meta), path("${id}.raw.matrix/features.tsv.gz")
     tuple val(meta), path("${id}.raw.matrix/barcodes.tsv.gz")
     tuple val(meta), path("matrix.mtx.gz", includeInputs: true)
     tuple val(meta), path("${id}.cellMetrics.parquet")
-    tuple val(meta), path("${id}_allCellsWithAssignment.csv")
+    tuple val(meta), path("${id}_allCellsWithAssignment.csv"), emit: allCells
 
     script:
     libStruct = "${libStructDir}/${libStructName}"
@@ -44,7 +41,29 @@ process MetricsGeneration {
         opts += "--expected_combos '${meta.barcodes}'"
     }
     """
-    scaleplex_assignment.py --umi_matrix matrix.mtx.gz --all_cells $allCells --cell_stats $cellMetrics --references $libStructDir --lib_struct $libStruct --id $id --outDir . --assignment_method $params.scalePlexAssignmentMethod --toptwo_frac ${params.scalePlexPercentFromTopTwo / 100} $opts --fc_threshold $params.scalePlexFCThreshold
+    scaleplex_assignment.py --umi_matrix matrix.mtx.gz --all_cells $allCells --cell_stats $cellMetrics --references $libStructDir --lib_struct $libStruct --id $id --outDir . --assignment_method $params.scalePlexAssignmentMethod --toptwo_frac ${params.scalePlexPercentFromTopTwo / 100} $opts --fc_threshold $params.scalePlexFCThreshold --min_cell_count_bg $params.scalePlexMinCellCountBG --min_bg_scaleplex_count $params.scalePlexMinBGVal
+    """
+}
+
+process SampleStats {
+    tag "$meta.sample"
+	label 'large'
+    publishDir { file(params.outputDir) / reportDir / "csv" }, pattern: "${id}.scaleplex_stats.csv", mode: 'copy'
+
+    input:
+    tuple val(meta), path(allCells), path(cellMetrics), val(libCount)
+
+    output:
+    tuple val(meta), path("${id}.scaleplex_stats.csv"), path("metrics.csv"), emit: metrics
+
+    script:
+    id = meta.sample + "." + meta.lib
+    reportDir = "reports"
+    if (libCount > 1 && meta.lib != "merged") {
+        reportDir += "/${meta.sample}_libraries"
+    }
+    """
+    scaleplex_sample_stats.py --all_cells $allCells --cell_stats $cellMetrics --id $id --outDir .
     """
 }
 
@@ -89,7 +108,20 @@ workflow SCALE_PLEX_REPORTING {
             .dump(tag:'perSampleCountRaw')
             .set { perSampleCountRaw }
         MetricsGeneration(libJson.getParent(), libJson.getName(), perSampleCountRaw)
+        SampleStats(
+            MetricsGeneration.out.allCells
+                .join(MetricsGeneration.out.metrics
+                    .map { meta, cellMetrics, _mtx ->
+                        [meta, cellMetrics]
+                })
+                .join(perSampleCountRaw
+                    .map { meta, _cellMetrics, _rawUmi, _allCells, libraryCount ->
+                        [meta, libraryCount]
+                    })
+                .dump(tag:'scalePlexSampleStatsInput')
+        )
     
     emit:
-        metrics = MetricsGeneration.out.metrics
+        metrics = MetricsGeneration.out.metrics.join(SampleStats.out.metrics)
+        allCells = MetricsGeneration.out.allCells
 }

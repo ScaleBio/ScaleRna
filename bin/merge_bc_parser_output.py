@@ -5,6 +5,8 @@ Python script to merge multiple demuxJson.json files
 from collections import defaultdict
 import argparse
 import json
+from pathlib import Path
+from scale_utils.lib_json_parser import LibJsonParser
 
 
 def load_json(fname):
@@ -40,10 +42,10 @@ def merge(bc_jsons, lib_json, libName):
     master_dict = defaultdict(dict, {k: {} for k in list(bc_jsons_list[0].keys())})
 
     # Load library json
-    lib_json_dict = load_json(lib_json)
+    lib_json_obj = LibJsonParser(lib_json)
 
     # Get barcode levels
-    names_in_lib_json = [x["name"] for x in lib_json_dict["barcodes"]]
+    names_in_lib_json = [x["name"] for x in lib_json_obj.json_contents["barcodes"]]
 
     # Initialize dict which will hold combined metrics from "barcodes" section
     summation_metrics = defaultdict(defaultdict, {k: {} for k in names_in_lib_json})
@@ -140,7 +142,7 @@ def main():
     parser.add_argument(
         "--bc_jsons", nargs="+", type=str, help="bc parser json files that need to be concatenated", required=True
     )
-    parser.add_argument("--lib_json", type=str, help="Path to library json file", required=True)
+    parser.add_argument("--lib_json", type=Path, help="Path to library json file", required=True)
     parser.add_argument(
         "--libName", type=str, help="Name of the library to be used in the output file name", required=True
     )

@@ -14,19 +14,19 @@ isBarnyard | Indicates that this is a combined multi-species genome | optional |
 * All files (`star_index`, `gtf`, ...) can be specified either as
     - an absolute path (`/path/to/genome`)
     - a relative path starting from the location of the `genome.json` file (`genes/filtered.gtf`)
-    - a AWS S3 url (s3://path/to/genome)
+    - a AWS S3 url (`s3://path/to/genome`)
 
 ## STAR index
-The provided STAR index needs to be built with STAR version `>= 2.7.4a`. It also has to include the gene annotation, e.g. be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options. An example command would be
+The provided STAR index needs to be built with STAR version `>= 2.7.4a`. It also has to include the gene annotation, i.e., be built with `--sjdbGTFfile /PATH/TO/genes.gtf` See the STAR [documentation](https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf) for additional options. An example command would be
 ```
 STAR --runMode genomeGenerate --runThreadN 16 --genomeDir star.ref --genomeFastaFiles Homo_sapiens.GRCh38.dna.primary_assembly.fa --sjdbGTFfile Homo_sapiens.GRCh38.103.biotypeFiltered.gtf
 ```
 
 ### Annotation
-All transcripts in the _GTF_ file used to built the STAR index are included in the analysis (i.e. in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index. Only the `exon` entries in the GTF are relevant for STAR.
+All transcripts in the _GTF_ file used to built the STAR index are included in the analysis (i.e., in the output gene expression matrix). To exclude certain annotations (e.g. pseudo-genes), filter the GTF before generating the STAR index. Only the `exon` entries in the GTF are relevant for STAR.
 
 ## Pre-built genomes
-Pre-build reference genome for human and mouse are available for download:
+Pre-built reference genome for human and mouse are available for download:
 * Human (GRCh38): http://scale.pub.s3.amazonaws.com/genomes/rna/grch38.tgz
 * Mouse: http://scale.pub.s3.amazonaws.com/genomes/rna/mm39.tgz
 * Human/Mouse Barnyard: http://scale.pub.s3.amazonaws.com/genomes/rna/grch38_mm39.tgz

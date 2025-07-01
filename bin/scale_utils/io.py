@@ -5,29 +5,8 @@ import gzip
 import duckdb
 import numpy as np
 import scipy.sparse as sp
-from collections import OrderedDict
 from pathlib import Path
 from typing import Dict
-
-
-def readJSON(file: Path, preserveDictOrder: bool = False):
-    """
-    Function to read in JSON file and return it as a dictionary
-
-    Args:
-        file: Path to .json file
-        preserveDictOrder: Flag to indicate whether to
-            read the file while preserving the order of entries
-
-    Returns:
-        Dictionary with contents of json file
-    """
-    with open(file) as f:
-        str = f.read()
-        strStripped = str.rstrip()
-        pairs_hook = OrderedDict if preserveDictOrder else None
-        parsedJSON = json.loads(strStripped, object_pairs_hook=pairs_hook)
-    return parsedJSON
 
 
 def ensurePathsExist(filePaths: Dict[str, Path]):

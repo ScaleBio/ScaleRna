@@ -21,8 +21,8 @@ The QuantumScale RNA assay is supported with version 2.0 and later.
 
 ## Required Inputs
 * Sequencing reads (one of the following)
-    * An llumina sequencer RunFolder (`.bcl` files)
-    * A directory with `.fastq` files including index reads; see [Fastq generation](docs/fastqGeneration.md).
+    * An Illumina sequencer RunFolder (`BCL` files)
+    * A directory with `FASTQ` files including index reads; see [Fastq generation](docs/fastqGeneration.md).
     * A directory containing unaligned cram files from Ultima Genomics sequencing
 * Sample table
     * A `.csv` file listing all samples for this analysis run, optionally split by RT barcode. See [samples.csv](docs/samplesCsv.md).
@@ -47,12 +47,12 @@ A small test run, with all input data stored online, can be run with the followi
 
 With this command, nextflow will automatically download the input data from the internet (AWS S3), so please ensure that the compute nodes have internet access and storage space. Alternatively you can manually download the data first (using [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html)):
 ```
-aws s3 sync s3://scale.pub/testData/rna/202504_quantumV1/fastq fastq --no-sign-request
+aws s3 sync s3://scale.pub/testData/rna/202506_quantumV1/fastq fastq --no-sign-request
 aws s3 sync s3://scale.pub/testData/rna/GRCh38_chr20_genome GRCh38_chr20_genome --no-sign-request
 ```
 and then run with
 ```
-nextflow run /PATH/TO/ScaleRna/ -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --genome GRCh38_chr1_genome/grch38.chr1.json --fastqDir fastqs --outDir /PATH/TO/OUTPUT_DIR
+nextflow run /PATH/TO/ScaleRna/ -profile PROFILE -params-file /PATH/TO/ScaleRna/docs/examples/runParams.yml --genome GRCh38_chr20_genome/genome.json --fastqDir fastq --outDir /PATH/TO/OUTPUT_DIR
 ```
 
 Note that this test run is merely a quick and easy way to verify that the pipeline executes properly and does not represent a complete or realistic dataset.

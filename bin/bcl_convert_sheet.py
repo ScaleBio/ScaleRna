@@ -15,6 +15,7 @@ import sys
 from typing import Any, List, Dict
 import xml.etree.ElementTree as ET
 from scale_utils.validation import validateName
+from scale_utils.lib_json_parser import LibJsonParser
 
 # Fixed samplesheet.csv settings
 SETTINGS = {
@@ -70,40 +71,17 @@ def revComp(seq: str) -> str:
     return seq.translate(str.maketrans("acgtACGT", "tgcaTGCA"))[::-1]
 
 
-def load_bcs(tsv: Path) -> Dict[str, str]:
-    """
-    Load barcode sequences from a .tsv file as used by library.json
-
-    Returns:
-        Dict mapping name (e.g. well position) to barcode sequence (or sequence to sequence if no names in the file)
-    """
-    bcs = {}
-    for line in open(tsv):
-        if line.startswith("#"):
-            continue
-        line = line.strip().split()
-        # No name given, use sequence as name
-        if len(line) == 1:
-            seq = line[0]
-            name = seq
-        else:
-            name = line[0]
-            seq = line[1:]
-        bcs[name] = seq
-    return bcs
-
-
-def load_libDef(jlib: Path) -> Dict[str, Any]:
+def load_libDef(lib_json_obj: LibJsonParser) -> Dict[str, Any]:
     """
     Load fastq generation settings from library structure definition json
 
     Args:
-        jlib: Library.json file
+        lib_json_obj: Object containing library structure information
 
     Returns:
         Dict: SettingName -> Value
     """
-    lib = json.load(open(jlib))
+    lib = lib_json_obj.json_contents
     bclOpts = lib.get("bcl_convert", {})
     res = {}
     res["adapter"] = bclOpts.get("adapter", None)
@@ -111,10 +89,11 @@ def load_libDef(jlib: Path) -> Dict[str, Any]:
     res["library_barcodes"] = {}
     if bclOpts.get("library_barcodes"):
         if isinstance(bclOpts["library_barcodes"], dict):
-            res["library_barcodes"] = jlib.parent / bclOpts["library_barcodes"]["sequences"]
+            # bclOpts["library_barcodes"]["sequences"] evaluates to index1Seqs or index2Seqs
+            res["library_barcodes"] = lib_json_obj.parent_dir / bclOpts[bclOpts["library_barcodes"]["sequences"]]
             res["libIndexUsed"] = bclOpts["library_barcodes"]["libIndexUsed"]
         else:
-            res["library_barcodes"] = jlib.parent / bclOpts["library_barcodes"]
+            res["library_barcodes"] = lib_json_obj.parent_dir / bclOpts["library_barcodes"]
     res["uniqueDualIndex"] = bclOpts.get("uniqueDualIndex", False)
     res["index2RevComp"] = bclOpts.get("index2RevComp", False)
     res["split_on"] = bclOpts.get("split_on")
@@ -122,9 +101,9 @@ def load_libDef(jlib: Path) -> Dict[str, Any]:
     res["index1BClen"] = bclOpts.get("index1BClen")
     res["index2BClen"] = bclOpts.get("index2BClen")
     if seqsFn := bclOpts.get("index1Seqs"):
-        res["index1Seqs"] = jlib.parent / seqsFn
+        res["index1Seqs"] = lib_json_obj.parent_dir / seqsFn
     if seqsFn := bclOpts.get("index2Seqs"):
-        res["index2Seqs"] = jlib.parent / seqsFn
+        res["index2Seqs"] = lib_json_obj.parent_dir / seqsFn
     return res
 
 
@@ -224,7 +203,7 @@ def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]], libDe
     return list(libs.values())
 
 
-def assign_index(libraries: List[Library], libDef: Dict, reads: Dict[str, ReadInfo]) -> IndexInfo:
+def assign_index(libraries: List[Library], libDef: Dict, reads: Dict[str, ReadInfo], lib_json_obj: LibJsonParser) -> IndexInfo:
     """
     Finalize index sequences for each library (fastq sample)
 
@@ -236,12 +215,12 @@ def assign_index(libraries: List[Library], libDef: Dict, reads: Dict[str, ReadIn
     """
     # lib.json can define a the full list of barcode sequences to use for index1 and/or 2
     if bcFn := libDef.get("index1Seqs"):
-        allSeqs = load_bcs(bcFn)
+        allSeqs = lib_json_obj.load_whitelist(bcFn)
         for lib in libraries:
             if not lib.index1:
                 lib.index1 = list(allSeqs.values())
     if bcFn := libDef.get("index2Seqs"):
-        allSeqs = load_bcs(bcFn)
+        allSeqs = lib_json_obj.load_whitelist(bcFn)
         for lib in libraries:
             if not lib.index2:
                 lib.index2 = list(allSeqs.values())
@@ -277,13 +256,13 @@ def print_settings(settings: Dict):
         print(f"{s},{v}")
 
 
-def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, settings: dict[str, str], libDef: dict):
+def main(samplesCsv: Path, lib_json_obj: LibJsonParser, runInfo: Path, splitFastq: bool, settings: dict[str, str], libDef: dict):
     """
     Prepare the bcl_convert samplesheet.csv and print to stdout
 
     Args:
         samplesCsv: Path to input samples.csv file
-        libJson: Path to library structure definition
+        lib_json_obj: Object containing library structure information
         runInfo: Path to RunInfo.xml
         splitFastq: Split sample by PCR index barcode sequence
         settings: Fixed settings for samplesheet.csv
@@ -296,7 +275,7 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
         )
 
     if fqBcs := libDef["library_barcodes"]:
-        fqBcs = load_bcs(fqBcs)
+        fqBcs = lib_json_obj.load_whitelist(fqBcs)
 
     reads = load_run(runInfo)
     # Adapter trimming
@@ -309,13 +288,13 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
         settings["NoLaneSplitting"] = "true"
     libs = load_libraries(samplesCsv, fqBcs, libDef)
     reads = load_run(runInfo)
-    indexInfo = assign_index(libs, libDef, reads)
+    indexInfo = assign_index(libs, libDef, reads, lib_json_obj)
     # If splitFastq is set, we split the samples by PCR barcode for parallelization
     # in the pattern ("SampleName_PcrIndex")
     # Those will be merged again later in the workflow
     if libDef["split_on"] == "index1":
         if splitFastq and indexInfo.index1Used and (bcFn := libDef.get("index1Seqs")):
-            indexSeqs = load_bcs(bcFn)
+            indexSeqs = lib_json_obj.load_whitelist(bcFn)
             splitSamples = []
             for lib in libs:
                 for bc_name, seq in indexSeqs.items():
@@ -327,7 +306,7 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
             libs = splitSamples
     elif libDef["split_on"] == "index2":
         if splitFastq and indexInfo.index2Used and (bcFn := libDef.get("index2Seqs")):
-            indexSeqs = load_bcs(bcFn)
+            indexSeqs = lib_json_obj.load_whitelist(bcFn)
             splitSamples = []
             for lib in libs:
                 for bc_name, seq in indexSeqs.items():
@@ -345,8 +324,8 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
             and (bc1Fn := libDef.get("index1Seqs"))
             and (bc2Fn := libDef.get("index2Seqs"))
         ):
-            indexSeqs1 = load_bcs(bc1Fn)
-            indexSeqs2 = load_bcs(bc2Fn)
+            indexSeqs1 = lib_json_obj.load_whitelist(bc1Fn)
+            indexSeqs2 = lib_json_obj.load_whitelist(bc2Fn)
             splitSamples = []
             for lib in libs:
                 for bc1_name, seq1 in indexSeqs1.items():
@@ -409,6 +388,7 @@ def main(samplesCsv: Path, libJson: Path, runInfo: Path, splitFastq: bool, setti
                 print(lib.name, i1, i2, sep=",")
         elif indexInfo.index1Used:
             for i1 in i1s:
+                i1 = i1[0] if isinstance(i1, list) else i1
                 if indexInfo.index2Used:
                     # All i1 * i2 combinations
                     for i2 in i2s:
@@ -432,6 +412,7 @@ if __name__ == "__main__":
     parser.add_argument("--splitFastq", action="store_true", help="Split sample by PCR index barcode sequence")
     args = parser.parse_args()
 
-    libDef = load_libDef(args.libDef)
+    lib_json_obj = LibJsonParser(args.libDef)
+    libDef = load_libDef(lib_json_obj)
 
-    main(args.samples, args.libDef, args.runinfo, args.splitFastq, SETTINGS, libDef)
+    main(args.samples, lib_json_obj, args.runinfo, args.splitFastq, SETTINGS, libDef)

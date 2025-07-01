@@ -10,14 +10,15 @@ import tempfile
 import gzip
 import shutil
 from filecmp import cmp
-from typing import Optional
+
 import numpy as np
 import pandas as pd
 import duckdb
 from scipy.stats import median_abs_deviation
-from cell_finder import construct_ambient_profile, test_ambiguous_barcodes
+
+from cell_finder import rescue_cells
 from scale_utils import io
-from scale_utils.stats import extrapolate_unique
+from scale_utils.stats import OutlierOptions
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,10 @@ class CellCallingOptions:
         FDR: False discovery rate to use for rescuing cells based on deviation from ambient profile.
         alpha:
             Overdispersion parameter for Dirichlet Multinomial distribution.
-            If none, estimated from ambient barcodes.
+            If 0, estimated from ambient barcodes.
+        medianFraction:
+            When running cellFinder only cells with a UTC count above medianFraction times the median
+            count of cells passing the UTC threshold are considered ambiguous and hence tested
     """
 
     fixedCells: bool
@@ -55,20 +59,21 @@ class CellCallingOptions:
     UTC: int
     cellFinder: bool
     FDR: float
-    alpha: Optional[float]
+    alpha: float
+    medianFraction: float
 
 
 @dataclass(frozen=True)
-class OutlierOptions:
+class CellfinderMetrics:
     """
-    Options for flagging / filtering cell outliers based on QC metrics
+    Summary metrics from the cellfinder process
     """
 
-    filter_outliers: bool
-    reads_mads: float
-    passing_mads: float
-    mito_mads: float
-    mito_min_thres: float = 0.05
+    UTCThreshold: int
+    maxAmbiguous: int
+    minAmbiguous: int
+    numAmbiguous: int
+    alpha: float
 
 
 def classify_barcodes(
@@ -93,6 +98,9 @@ def classify_barcodes(
     if options.cellFinder:
         cell_barcodes = total_counts >= threshold
         ambiguous_barcodes = ~ambient_barcodes & ~cell_barcodes
+        ambiguous_barcodes = ambiguous_barcodes & (
+            total_counts >= np.median(total_counts[cell_barcodes]) * options.medianFraction
+        )
     elif options.fixedCells:
         if options.expectedCells < 0:
             raise ValueError("--expectedCells must be a positive integer.")
@@ -125,28 +133,28 @@ def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcodes: np.ndarr
         raise ValueError("--minCellRatio must be >= 1.")
     if options.expectedCells > 0 and options.expectedCells < len(total_counts):
         # when --expectedCells is set, use the top --expectedCells barcodes as preliminary cells
-        preliminary_cell_unique_transcript_counts = total_counts[np.argsort(total_counts)[::-1]][
-            : options.expectedCells
-        ]
+        prelim_utcs = total_counts[np.argsort(total_counts)[::-1]][: options.expectedCells]
     else:
-        preliminary_cell_unique_transcript_counts = total_counts[~ambient_barcodes]
+        prelim_utcs = total_counts[~ambient_barcodes]
 
     # Calculate unique transcripts counts threshold
     threshold = 0
-    if len(preliminary_cell_unique_transcript_counts) != 0:
+    if len(prelim_utcs) != 0:
         # Calculate the UTC threshold as the UMI count
         # associated with the --topCellPercent of the preliminary cells divided by --minCellRatio.
-        threshold = np.round(
-            np.percentile(preliminary_cell_unique_transcript_counts, options.topCellPercent) / options.minCellRatio
-        )
+        threshold = np.round(np.percentile(prelim_utcs, options.topCellPercent) / options.minCellRatio)
 
     # Don't return threshold below minUTC
     return max(threshold, options.minUTC)
 
 
 def call_cell_barcodes(
-    con: duckdb.DuckDBPyConnection, bcs_df: pd.DataFrame, options: CellCallingOptions, subset: np.ndarray
-) -> None:
+    con: duckdb.DuckDBPyConnection,
+    bcs_df: pd.DataFrame,
+    options: CellCallingOptions,
+    subset: np.ndarray,
+    counts_col: str = "counts",
+) -> pd.DataFrame:
     """
     Call cells in this sample using thresholding options, including optionally
     rescuing ambiguous barcodes as cells with the CellFinder algorithm
@@ -158,14 +166,21 @@ def call_cell_barcodes(
         subset:
             bool array to subset bcs_df or mtx.
             Used with barnyard data to subset bcs_df/mtx to mouse/human only.
+        counts_col: For barnyard data, the column in bcs_df to use for cell calling.
 
     Returns:
-        None, updates the pass and flags columns in bcs_df
+        CellCalling metrics DataFrame
+
+    Updates the pass and flags columns in bcs_df
     """
-    total_counts = bcs_df.loc[subset, "counts"].to_numpy()
+    total_counts = bcs_df.loc[subset, counts_col].to_numpy()
     ambient_bcs, ambiguous_bcs, cell_bcs = classify_barcodes(total_counts, options=options)
     flags = pd.Series("", index=bcs_df.index[subset])
-    passed = pd.Series(cell_bcs, index=bcs_df.index[subset])
+    passed = pd.Series(cell_bcs, index=bcs_df.index[subset], copy=True)
+    cellfinder_metrics = [
+        ("CellCalling", "ambiguous_bcs", ambiguous_bcs.sum()),
+        ("CellCalling", "ambient_bcs", ambient_bcs.sum()),
+    ]
     if np.any(ambiguous_bcs):  # cellfinder algorithm to rescue ambiguous barcodes
         # get indices of barcodes, is subset in barnyard data
         all_indices = np.argwhere(subset).ravel()
@@ -179,17 +194,33 @@ def call_cell_barcodes(
         ambient_gene_sums = ambient_gene_sums[nzgenes]
         gene_sums = gene_sums[nzgenes]
 
-        # Construct ambient profile to test barcodes against
-        ambient_profile = construct_ambient_profile(ambient_gene_sums, gene_sums)
-
         # Call barcodes with FDR <= --FDR as cells
-        FDRs = test_ambiguous_barcodes(
-            con, nzgenes, all_indices, ambient_bc_sums, ambient_profile, ambient_bcs, ambiguous_bcs, alpha=options.alpha
+        FDRs, stats = rescue_cells(
+            con,
+            nzgenes,
+            all_indices,
+            ambient_bc_sums,
+            ambient_gene_sums,
+            gene_sums,
+            ambient_bcs,
+            ambiguous_bcs,
+            options.alpha,
+            len(cell_bcs),
         )
-        passed.iloc[ambiguous_bcs] = FDRs <= options.FDR
-        flags.iloc[ambiguous_bcs] = flags.iloc[ambiguous_bcs].where(FDRs > options.FDR, other="cellFinder")
+        passed.loc[ambiguous_bcs] = FDRs <= options.FDR
+        flags.loc[ambiguous_bcs] = flags.iloc[ambiguous_bcs].where(FDRs > options.FDR, other="cellFinder")
+        cellfinder_metrics.extend(
+            [
+                ("CellCalling", "min_ambiguous", total_counts[ambiguous_bcs].min()),
+                ("CellCalling", "max_ambiguous", total_counts[ambiguous_bcs].max()),
+                ("CellCalling", "alpha", stats["alpha"]),
+                ("CellCalling", "min_pval", stats["min_pval"]),
+            ]
+        )
+
     bcs_df.loc[subset, "pass"] = passed
     bcs_df.loc[subset, "flags"] = flags
+    return pd.DataFrame.from_records(cellfinder_metrics, columns=["Category", "Metric", "Value"])
 
 
 def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
@@ -202,7 +233,7 @@ def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
         options: Options for outlier filtering
 
     Returns:
-        MAD statistics used for flagging cells
+        Metrics about MAD cell filtering
     """
     cells = bcs_df[bcs_df["pass"]]  # Only run outlier filtering on cells (not background)
     flags = pd.Series("", index=cells.index)
@@ -232,143 +263,35 @@ def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
     return pd.DataFrame.from_records(stats, columns=["Category", "Metric", "Value"])
 
 
-def calculate_sample_stats(
-    con: duckdb.DuckDBPyConnection,
-    internal_report: bool,
-    is_cellFinder: bool,
-    filter_outliers: bool,
-    is_barnyard: bool,
-    total_sample_reads: int,
-) -> pd.DataFrame:
+def parse_star_log(reads: dict[str, float], star_log: Path) -> dict[str, float]:
     """
-    Calculate sample-level statistics from the all_cells dataframe
+    Parse STAR alignment log file to extract additional read statistics
 
     Args:
-        con: duckdb connection with all_barcodes table
-        internal_report: Whether to generate stats consistent with internal report
-        is_cellFinder: Was CellFinder used to call cells?
-        filter_outliers: Were QC flagged celled filtered / failed?
-        total_sample_reads: Total sample reads, obtained from bcParser; set to 0 if bcParser was not run
+        reads: Dictionary containing read statistics
+        star_log: Path to the STARsolo log file
 
     Returns:
-        Sample-level statistics
+        Updated reads dictionary with additional statistics
     """
-    sample_stats = {"Reads": {}, "Cells": {}, "Extrapolated Complexity": {}}
-    barnyard_cols = ""
-    if is_barnyard:
-        barnyard_cols = """
-        min(counts) FILTER (pass AND species == 'Mouse') AS mouse_utc,
-        min(counts) FILTER (pass AND species == 'Human') AS human_utc
-        """
-
-    query_results = (
-        con.sql(
-            f"""
-        SELECT
-            sum(totalReads) AS total_reads,
-            sum(countedReads) AS counted_reads,
-            sum(mappedReads) AS mapped_reads,
-            sum(geneReads) AS gene_reads,
-            sum(exonReads) AS exon_reads,
-            sum(antisenseReads) AS antisense_reads,
-            sum(mitoReads) AS mito_reads,
-            sum(counts) AS counts,
-            count(cell_id) FILTER (pass) AS cells_called,
-            min(counts) FILTER (pass) AS utc_threshold,
-            count(cell_id) FILTER (pass AND flags LIKE '%cellFinder%') AS cellFinder_calls,
-            count(cell_id) FILTER (flags LIKE '%low_%' OR flags LIKE '%high_%') AS qc_filtered,
-            count(cell_id) FILTER (pass AND (flags LIKE '%low_%' OR flags LIKE '%high_%')) AS qc_flagged,
-            mean(totalReads) FILTER (pass) AS mean_passing_reads,
-            median(countedReads) FILTER (pass) AS median_reads,
-            median(counts) FILTER (pass) AS median_utc,
-            median(genes) FILTER (pass) AS median_genes,
-            sum(countedReads) FILTER (pass) / sum(countedReads) AS reads_in_cells,
-            sum(mitoReads) FILTER (pass) AS mito_reads_passing,
-            {barnyard_cols}
-        FROM all_barcodes;
-        """
-        )
-        .df()
-        .to_dict(orient="index")[0]
-    )
-
-    reads = sample_stats["Reads"]
-    if total_sample_reads != 0:
-        reads["total_sample_reads_post_barcode_demux"] = total_sample_reads
-    reads["total_reads"] = query_results["total_reads"]
-    reads["counted_reads"] = query_results["counted_reads"]
-    reads["mapped_reads"] = query_results["mapped_reads"]
-    reads["mapped_reads_perc"] = reads["mapped_reads"] / reads["total_reads"]
-    reads["gene_reads"] = query_results["gene_reads"]
-    reads["gene_reads_perc"] = reads["gene_reads"] / reads["mapped_reads"]
-    reads["exon_reads"] = query_results["exon_reads"]
-    reads["exon_reads_perc"] = reads["exon_reads"] / reads["gene_reads"]
-    reads["antisense_reads"] = query_results["antisense_reads"]
-    reads["antisense_reads_perc"] = reads["antisense_reads"] / reads["mapped_reads"]
-    reads["mito_reads"] = query_results["mito_reads"]
-    reads["mito_reads_perc"] = reads["mito_reads"] / reads["mapped_reads"]
-    reads["counts"] = query_results["counts"]
-    reads["saturation"] = 1 - reads["counts"] / reads["counted_reads"]
-
-    cells = sample_stats["Cells"]
-    cells["cells_called"] = query_results["cells_called"]
-    cells["mean_passing_reads"] = query_results["mean_passing_reads"]
-    if is_cellFinder:
-        cells["cellFinder_calls"] = query_results["cellFinder_calls"]
-    else:
-        cells["utc_threshold"] = query_results["utc_threshold"]
-    if filter_outliers:
-        cells["qc_filtered"] = query_results["qc_filtered"]
-    else:
-        cells["qc_flagged"] = query_results["qc_flagged"]
-
-    if total_sample_reads != 0:
-        if cells["cells_called"] == 0:
-            cells["reads_per_cell"] = 0
-        else:
-            cells["reads_per_cell"] = total_sample_reads / cells["cells_called"]
-    cells["median_reads"] = query_results["median_reads"]
-    cells["median_utc"] = query_results["median_utc"]
-    cells["median_genes"] = query_results["median_genes"]
-    cells["reads_in_cells"] = query_results["reads_in_cells"]
-    cells["mito_reads"] = query_results["mito_reads_passing"]
-
-    if is_barnyard:
-        sample_stats["Barnyard"] = {}
-        barnyard = sample_stats["Barnyard"]
-        barnyard["mouse_utc"] = query_results["mouse_utc"]
-        barnyard["human_utc"] = query_results["human_utc"]
-
-    complexity = sample_stats["Extrapolated Complexity"]
-    unique_reads = []
-    target_mean_reads = [100, 500, 1000, 5000, 10000, 20000]
-    for d in target_mean_reads:
-        if (
-            total_sample_reads == 0
-            or cells["reads_per_cell"] == 0
-            or (d >= cells["reads_per_cell"] and not internal_report)
-        ):
-            complexity[f"target_reads_{d}"] = np.nan
-        else:
-            # Target reads refers to the mean reads per cell, but we are estimating
-            # UMIs / complexity in the median cell. Approx. scaling median reads by the same
-            # factor as mean reads.
-            target_median_reads = (d / cells["reads_per_cell"]) * cells["median_reads"]
-            unique_reads = extrapolate_unique(cells["median_reads"], cells["median_utc"], target_median_reads)
-            complexity[f"target_reads_{d}"] = unique_reads
-
-    stats_stats_df = pd.DataFrame(
-        [
-            {"Category": category, "Metric": metric, "Value": value}
-            for category, metrics in sample_stats.items()
-            for metric, value in metrics.items()
-        ]
-    )
-
-    return stats_stats_df
+    with open(star_log, "r") as f:
+        for line in f:
+            if "Average input read length" in line:
+                reads["avg_trimmed_read_len"] = float(line.split("Average input read length |")[1].strip())
+            if "Average mapped length" in line:
+                reads["avg_mapped_len"] = float(line.split("Average mapped length |")[1].strip())
+            if "Mismatch rate per base, % |" in line:
+                reads["mismatch_rate_per_base_perc"] = float(
+                    line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]
+                )
+            if "% of reads mapped to too many loci |" in line:
+                reads["mapped_to_too_many_loci_perc"] = float(
+                    line.split("% of reads mapped to too many loci |")[1].strip().split("%")[0]
+                )
+    return reads
 
 
-def validate_bcs_df_order(bcs_df: pd.DataFrame, star_barcodes_path: str) -> None:
+def validate_bcs_df_order(bcs_df: pd.DataFrame, star_barcodes_path: Path) -> None:
     """Check that the order of bcs_df matches barcodes.tsv from merged star output
 
     We rely on the order of the bcs_df DataFrame to match the order of the barcodes.tsv file
@@ -460,7 +383,7 @@ def generate_filtered_matrix(
         outfile.write(f"{nrows} {len(bcs_df)} {str(nnz).zfill(13)}\n")
 
 
-def score_ambig_cells(bcs_df: pd.DataFrame) -> None:
+def label_barnyard(bcs_df: pd.DataFrame) -> None:
     """
     In barnyard datasets, based on UMI count and minor fraction, label cells in 'species' column as either:
         (1) 'Human'
@@ -517,7 +440,7 @@ def score_ambig_cells(bcs_df: pd.DataFrame) -> None:
     ] = "Ambiguous"
 
 
-def get_background(minor_fracs: list) -> tuple[float, float]:
+def get_background(minor_fracs: pd.Series) -> tuple[float, float]:
     """
     Calculate median and standard deviation for barnyard cells
 
@@ -534,41 +457,13 @@ def get_background(minor_fracs: list) -> tuple[float, float]:
     return median, std
 
 
-def filter_beads(con, filter_max_bead_cells: bool, bc_limit) -> pd.DataFrame:
-    # https://duckdb.org/docs/sql/statements/update.html#update-from-same-table
-    con.sql(
-        """
-    UPDATE all_barcodes
-    SET bead_bcs_total = (
-        SELECT COUNT(*)
-        FROM all_barcodes AS b
-        WHERE b.bead_bc = all_barcodes.bead_bc
-    );
-    UPDATE all_barcodes
-    SET bead_bcs_pass = (
-        SELECT COUNT(*)
-        FROM all_barcodes AS b
-        WHERE b.bead_bc = all_barcodes.bead_bc AND b.pass
-    );
-    """
-    )
-
-    max_bead_bcs = (
-        con.sql(
-            """
-    SELECT COUNT(DISTINCT PBC) AS max_bead_bcs FROM all_barcodes;
-    """
-        ).fetchnumpy()["max_bead_bcs"][0]
-        if bc_limit == "max"
-        else int(bc_limit)
-    )
-
-    filter_query = ", pass = false" if filter_max_bead_cells else ""
+def filter_beads(con, fail_ambient: bool, bead_scores: Path, min_kl_score: float) -> None:
+    filter_query = ", pass = false" if fail_ambient else ""
     con.sql(
         f"""
     UPDATE all_barcodes
-    SET flags = COALESCE(flags || ';', '') || 'max_bead_bcs'{filter_query}
-    WHERE bead_bcs_pass >= {max_bead_bcs};
+    SET flags = COALESCE(flags || ';', '') || 'ambient_bead'{filter_query}
+    WHERE bead_bc IN (SELECT bead_bc FROM '{bead_scores}' WHERE kl_norm < {min_kl_score}) AND pass;
     """
     )
 
@@ -577,7 +472,6 @@ def load_barcodes_table(
     barcode_metrics: Path,
     con: duckdb.DuckDBPyConnection,
     is_barnyard: bool,
-    is_quantum: bool,
 ) -> None:
     """
     Load a allBarcodes.parquet file into a duckdb table
@@ -588,14 +482,6 @@ def load_barcodes_table(
         is_barnyard: Whether the data is from a barnyard assay
         is_quantum: Whether the data is from a QuantumScale assay
     """
-    quantum_cols = (
-        """
-    CAST(null AS INTEGER) AS bead_bcs_total,
-    CAST(null AS INTEGER) AS bead_bcs_pass,
-    """
-        if is_quantum
-        else ""
-    )
     by_cols = (
         """
     'None' AS species,
@@ -608,7 +494,6 @@ def load_barcodes_table(
         f"""
     CREATE OR REPLACE TABLE all_barcodes
     AS SELECT * EXCLUDE (sample),
-    {quantum_cols}
     sample,
     CAST(null AS VARCHAR) AS flags,
     {by_cols}
@@ -752,9 +637,16 @@ def main():
     parser.add_argument(
         "--alpha",
         type=float,
-        default=None,
+        default=0,
         help="Set a fixed overdispersion (Dirichlet alpha) parameter for CellFinder. \
-            If none, estimated from ambient barcodes",
+            If 0, estimated from ambient barcodes",
+    )
+    parser.add_argument(
+        "--medianFraction",
+        type=float,
+        default=0,
+        help="Only cells with at least this fraction of counts relative to the median \
+            of cells passing the simple UTC threshold are tested by cellFinder",
     )
     # MAD outlier filtering
     parser.add_argument(
@@ -769,7 +661,6 @@ def main():
         "--madsPassingReads", type=float, default=np.nan, help="MAD threshold for passing reads fraction (- x MADs)"
     )
     parser.add_argument("--madsMito", type=float, default=np.nan, help="MAD threshold for mito. reads (+ x MADs)")
-    parser.add_argument("--totalSampleReads", type=int, help="Total sample reads, obtained from bcParser")
     # Optional argument to specify whether to generate statistics for internal report
     parser.add_argument("--internalReport", action="store_true", default=False)
     parser.add_argument("--isBarnyard", action="store_true", default=False)
@@ -777,7 +668,15 @@ def main():
 
     # Argument that determines whether or not beads are filtered from matrix due to high cell count.
     parser.add_argument("--filterBeads", action="store_true", default=False)
-    parser.add_argument("--maxBeadBcs", default="max")
+    parser.add_argument(
+        # Minimum KL divergence score to consider a bead as non-ambient
+        # Normalized range is roughly 0-1, with 0 perfectly matching the library RT count distribution
+        "--minDivergence",
+        default=0.05,
+        type=float,
+        help="Minimum normalized KL divergence score to consider a bead as non-ambient",
+    )
+    parser.add_argument("--beadScores", type=Path, required=False, help="Path to results of BeadFiltering process.")
     # Argument which indicates if data is from QuantumScale assay.
     parser.add_argument("--isQuantum", action="store_true", default=False)
     parser.add_argument("--threads", type=int, required=False, default=1, help="Number of threads for duckdb")
@@ -799,6 +698,7 @@ def main():
         cellFinder=args.cellFinder,
         FDR=args.FDR,
         alpha=args.alpha,
+        medianFraction=args.medianFraction,
     )
 
     outlier_options = OutlierOptions(
@@ -818,7 +718,7 @@ def main():
     SET memory_limit TO '{mem_limit}';
     """
     )
-    load_barcodes_table(args.sampleMetrics, con, args.isBarnyard, args.isQuantum)
+    load_barcodes_table(args.sampleMetrics, con, args.isBarnyard)
     by_cols = "human_counts, mouse_counts, species, minor_frac" if args.isBarnyard else ""
     bcs_df = con.sql(
         f"""
@@ -828,27 +728,25 @@ def main():
     if args.cellFinder:
         io.load_mtx_table(sample_specific_file_paths["mtx"], con)
 
+    metrics: list[pd.DataFrame] = []  # Collecting metrics from different steps
     if args.isBarnyard:
-
         bcs_df.loc[bcs_df["human_counts"] > bcs_df["mouse_counts"], "species"] = "Human"
         bcs_df.loc[bcs_df["mouse_counts"] > bcs_df["human_counts"], "species"] = "Mouse"
-
         mouse_cells = bcs_df["species"] != "Human"
         human_cells = bcs_df["species"] != "Mouse"
-
-        call_cell_barcodes(con, bcs_df, call_cells_options, mouse_cells)
-        call_cell_barcodes(con, bcs_df, call_cells_options, human_cells)
-
-        score_ambig_cells(bcs_df)
-
+        call_cell_barcodes(con, bcs_df, call_cells_options, mouse_cells, "mouse_counts")
+        call_cell_barcodes(con, bcs_df, call_cells_options, human_cells, "human_counts")
+        label_barnyard(bcs_df)
     else:
-        call_cell_barcodes(con, bcs_df, call_cells_options, np.ones(len(bcs_df), dtype=bool))
+        cellfinder_metrics = call_cell_barcodes(con, bcs_df, call_cells_options, np.ones(len(bcs_df), dtype=bool))
+        metrics.append(cellfinder_metrics)
 
     mad_stats = filter_cells(bcs_df, options=outlier_options)
+    metrics.append(mad_stats)
     update_barcodes_table(con, bcs_df, is_barnyard=args.isBarnyard, is_quantum=args.isQuantum)
 
     if args.isQuantum:
-        filter_beads(con, args.filterBeads, args.maxBeadBcs)
+        filter_beads(con, args.filterBeads, args.beadScores, args.minDivergence)
 
     # Finished calling cells, write allCells.csv for this sample
     metrics_dir = Path(".", f"{args.sample}_metrics")
@@ -874,21 +772,12 @@ def main():
     """
     )
 
-    sample_stats = calculate_sample_stats(
-        con,
-        internal_report=args.internalReport,
-        is_cellFinder=call_cells_options.cellFinder,
-        filter_outliers=outlier_options.filter_outliers,
-        is_barnyard=args.isBarnyard,
-        total_sample_reads=args.totalSampleReads,
-    )
-    sample_stats = pd.concat([sample_stats, mad_stats])
-    sample_stats.to_csv(metrics_dir / f"{args.sample}_sample_stats.csv", index=False)
-
-    # only need passing column for creating filtered matrix
-    bcs_df = con.sql("SELECT cell_id, pass FROM all_barcodes").df().set_index("cell_id")
+    # Write cellcalling metrics
+    pd.concat(metrics).to_csv(metrics_dir / f"{args.sample}_cellcalling_stats.csv", index=False)
 
     # Write filtered matrix for this sample
+    # only need passing column for creating filtered matrix
+    bcs_df = con.sql("SELECT cell_id, pass FROM all_barcodes").df().set_index("cell_id")
     generate_filtered_matrix(sample_specific_file_paths, bcs_df, args.sample, args.roundCounts, con)
     con.close()
 
