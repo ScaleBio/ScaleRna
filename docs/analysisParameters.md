@@ -36,7 +36,7 @@ Path to a [genome.json](genomes.md) file that contains the location of all seque
 ### Scale Bio RNA Kit Version
 * libStructure: "libQuantumV1.0.json"
 
-This defines the version of the Scale Bio single-cell RNA kit used to generate the libraries. The default `libQuantumV1.0.json` matches version 1.0 of the Quantum ScaleRNA. For older Scale RNA (_3 level_) kits, set `libStructure libV1.1.json` (Scale RNA v1.1 kit and extended throughput kit). 
+This defines the version of the Scale Bio single-cell RNA kit used to generate the libraries. The default `libQuantumV1.0.json` matches version 1.0 of the Quantum ScaleRNA. For older Scale RNA (_3 level_) kits, set `libStructure: "libV1.1.json"` (Scale RNA v1.1 kit and extended throughput kit). 
 
 ## Outputs
 * outDir: "ScaleRna.out"

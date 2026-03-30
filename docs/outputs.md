@@ -43,7 +43,7 @@ Columns in the `<sample>.<libIndex2>.allCells.csv` file:
 | antisenseReads | The number of reads mapping antisense to annotated exons | 
 | mitoReads | The number of reads mapping on mitochondrial genome
 | countedMultiGeneReads | The number of multi-gene reads that contributed to counts in the expression matrix
-| Saturation | `1 - (UniqueReads / TotalReads)` on _Reads Mapped to Transcriptome_ |
+| Saturation | `1 - (counts / countedReads)` |
 | mitoProp | Proportion of mapped reads that aligned to mitochondrial genome |
 | PCR | The alias for the PCR (library) barcode |
 | RT | RT plate well |
