@@ -139,16 +139,16 @@ def merge_cell_reads(
         for h in headers:
             merged_cellreads.write(h)
         for idx, star_dir in enumerate(star_dirs):
-            f = open(star_dir / star_feature / "CellReads.stats")
-            f.readline()
-            f.readline()  # skip reader
-            # Append contents of each CellReads.stats file to the merged file
-            for line in f:
-                if sample_ids:  # Append sample_id to each cell-barcode if given
-                    line = line.split("\t")
-                    line[0] = f"{line[0]}_{sample_ids[idx]}"
-                    line = "\t".join(line)
-                merged_cellreads.write(line)
+            with open(star_dir / star_feature / "CellReads.stats") as f:
+                f.readline()
+                f.readline()  # skip header
+                # Append contents of each CellReads.stats file to the merged file
+                for line in f:
+                    if sample_ids:  # Append sample_id to each cell-barcode if given
+                        line = line.split("\t")
+                        line[0] = f"{line[0]}_{sample_ids[idx]}"
+                        line = "\t".join(line)
+                    merged_cellreads.write(line)
 
 
 def merge_log_files(star_logs: list, log_out_dir: Path):
