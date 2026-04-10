@@ -375,11 +375,11 @@ def main():
     )
     args = parser.parse_args()
 
-    lib_json = {args.libraryStruct: json.load(open(args.libraryStruct))}
+    with open(args.libraryStruct) as f:
+        lib_json = {args.libraryStruct: json.load(f)}
     if args.scalePlexLibraryStruct is not None:
-        lib_json[args.scalePlexLibraryStruct] = json.load(
-            open(args.scalePlexLibraryStruct)
-        )
+        with open(args.scalePlexLibraryStruct) as f:
+            lib_json[args.scalePlexLibraryStruct] = json.load(f)
     whitelist = load_pool_whitelist(lib_json)
     if args.fastqDir:
         sniff_fastq(
