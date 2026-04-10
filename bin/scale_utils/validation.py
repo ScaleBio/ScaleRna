@@ -3,7 +3,7 @@
 import sys
 
 
-def validateName(name: str, display_name: str = "Name", other_chars: str = "-."):
+def validateName(name: str, display_name: str = "Name", other_chars: str = "-"):
     """
     Check name for invalid characters
     Print error and exit for invalid names
