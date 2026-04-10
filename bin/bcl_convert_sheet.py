@@ -169,7 +169,7 @@ def load_libraries(
                 for s in seqs.split(";"):
                     s = s.strip()
                     if s in namedIndexSeqs:
-                        lib.index1.extend(namedIndexSeqs[seqs])
+                        lib.index1.extend(namedIndexSeqs[s])
                     elif any((n not in "ACTGactg" for n in s)):
                         raise ValueError(f"Unknown library index: {s}")
                     else:
@@ -188,7 +188,7 @@ def load_libraries(
                     for s in seqs.split(";"):
                         s = s.strip()
                         if s in namedIndexSeqs:
-                            lib.index2.extend(namedIndexSeqs[seqs])
+                            lib.index2.extend(namedIndexSeqs[s])
                         elif any((n not in "ACTGactg" for n in s)):
                             raise ValueError(f"Unknown library index2: {s}")
                         else:
@@ -250,12 +250,10 @@ def assign_index(
         if index2Used and not lib.index2:
             raise ValueError(f"Missing index2 for {lib.name}")
 
-    print(libDef, file=sys.stderr)
     revCompIndex2 = libDef["index2RevComp"]
     # Rev. comp. index2 if needed (depending on sequencing platform and flags in RunInfo.xml used by bcl_convert)
     if index2Used and reads["I2"].isRevComp:
         revCompIndex2 = not revCompIndex2
-    print(revCompIndex2, file=sys.stderr)
     return IndexInfo(index1Used, index2Used, revCompIndex2)
 
 
