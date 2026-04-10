@@ -135,8 +135,8 @@ class LibJsonParser:
             Dictionary with contents of json file
         """
         with open(file) as f:
-            str = f.read()
-            strStripped = str.rstrip()
+            strRaw = f.read()
+            strStripped = strRaw.rstrip()
             pairs_hook = OrderedDict
             parsedJSON = json.loads(strStripped, object_pairs_hook=pairs_hook)
         return parsedJSON
