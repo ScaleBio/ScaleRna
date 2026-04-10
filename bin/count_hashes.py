@@ -107,7 +107,9 @@ def process_read(read, cellGuideReads, cellReads, mapping):
     umi = read.get_tag("UM")
     cell_barcodes = read.get_tag("CB").split("+")
     cell = tuple(replace_scaleplex_barcode_with_rna(cell_barcodes, mapping))
-    cellReads.addCount(cell)  # Count a read for the cell, having had a correct match to the barcode info
+    cellReads.addCount(
+        cell
+    )  # Count a read for the cell, having had a correct match to the barcode info
     if read.has_tag("sp"):
         cellGuideReads[cell].addRead(read.get_tag("sp"), umi)
     else:
@@ -120,14 +122,18 @@ def countGuideReads(bamDir: Path, mapping: dict):
     """Count reads for each cell X guide X UMI combo from bcParser bam output"""
     # BC -> (GUIDE,UMI) -> ReadCount
     # BC is a tuple of three strings for the three cell-barcode levels (RT, Ligation, PCR)
-    cellGuideReads: Dict[Tuple[str, ...], GuideReadCounts] = defaultdict(GuideReadCounts)
+    cellGuideReads: Dict[Tuple[str, ...], GuideReadCounts] = defaultdict(
+        GuideReadCounts
+    )
     cellReads = cellReadCounts()
     # Possible file extensions are either bam or ucram
     bam_files = list(bamDir.glob("*.bam")) + list(bamDir.glob("*.cram"))
     for bam in bam_files:
         with pysam.AlignmentFile(bam, "rb", check_sq=False) as samfile:
             for read in samfile.fetch(until_eof=True):
-                cellGuideReads, cellReads = process_read(read, cellGuideReads, cellReads, mapping)
+                cellGuideReads, cellReads = process_read(
+                    read, cellGuideReads, cellReads, mapping
+                )
     return cellGuideReads, cellReads
 
 
@@ -176,16 +182,26 @@ def create_sparse_matrix(counts_data_dict, column_file, read_umi_thresh):
                 col_idx = guide_mapping[guide]
                 rows.append(row_idx)
                 cols.append(col_idx)
-                umi_data_val = counts_data_dict[row_key].guides[guide].nUmis(read_umi_thresh)
+                umi_data_val = (
+                    counts_data_dict[row_key].guides[guide].nUmis(read_umi_thresh)
+                )
                 umi_data.append(umi_data_val)
             elif guide == "noGuide":
-                no_guide_values[row_key] = counts_data_dict[row_key].guides[guide].nUmis(1)
+                no_guide_values[row_key] = (
+                    counts_data_dict[row_key].guides[guide].nUmis(1)
+                )
 
     # Create the sparse matrix, cells x guides
-    umi_sparse_matrix = csr_matrix((umi_data, (rows, cols)), shape=(len(cell_mapping), len(guide_mapping)), dtype=int)
+    umi_sparse_matrix = csr_matrix(
+        (umi_data, (rows, cols)),
+        shape=(len(cell_mapping), len(guide_mapping)),
+        dtype=int,
+    )
 
     # Create a separate series for "noMatch" values mapped according to row_mapping
-    no_guide_series = pd.Series({row_key: no_guide_values[row_key] for row_key in counts_data_dict.keys()})
+    no_guide_series = pd.Series(
+        {row_key: no_guide_values[row_key] for row_key in counts_data_dict.keys()}
+    )
 
     no_guide_df = no_guide_series.to_frame(name="noGuide")
 
@@ -258,7 +274,9 @@ def main(
 
     cellGuideReads, cellReads = countGuideReads(bamDir, mapping)
     # Create  a table with UMI counts for each cell X guide combo
-    cellMetrics = pd.DataFrame.from_dict(cellReads.counts, orient="index", columns=["totalReads"])
+    cellMetrics = pd.DataFrame.from_dict(
+        cellReads.counts, orient="index", columns=["totalReads"]
+    )
     cellMetrics.index = pd.MultiIndex.from_tuples(cellMetrics.index, names=aliases_list)
 
     guide_path = f"{references}/{guide_file}"
@@ -272,9 +290,13 @@ def main(
     # Continue updating cellMetrics df
 
     cellMetrics["noScalePlex"] = (
-        round(noGuides["noGuide"] / cellMetrics["totalReads"], 3) if not cellMetrics.empty else np.nan
+        round(noGuides["noGuide"] / cellMetrics["totalReads"], 3)
+        if not cellMetrics.empty
+        else np.nan
     )  # Percentage of reads with no guide detected
-    cellMetrics["counts"] = umi_sparse_counts_matrix.sum(axis=1)  # number of unique guide UMI detected
+    cellMetrics["counts"] = umi_sparse_counts_matrix.sum(
+        axis=1
+    )  # number of unique guide UMI detected
     cellMetrics["scaleplex"] = umi_sparse_counts_matrix.getnnz(
         axis=1
     )  # number of unique guide's detected, like unique genes detected
@@ -288,12 +310,24 @@ def main(
         umi_sparse_counts_matrix, 3
     )  # third highest number of UMI of any guide within a cell
     cellMetrics["purity"] = round(cellMetrics["max"] / cellMetrics["counts"], 3)
-    cellMetrics["topTwo"] = round((cellMetrics["max"] + cellMetrics["second"]) / cellMetrics["counts"], 3)
+    cellMetrics["topTwo"] = round(
+        (cellMetrics["max"] + cellMetrics["second"]) / cellMetrics["counts"], 3
+    )
     cellMetrics["minorFrac"] = round(cellMetrics["second"] / cellMetrics["max"], 3)
     cellMetrics["Saturation"] = round(
-        1 - (cellMetrics.counts / (cellMetrics.totalReads - (cellMetrics.totalReads * cellMetrics.noScalePlex))), 3
+        1
+        - (
+            cellMetrics.counts
+            / (
+                cellMetrics.totalReads
+                - (cellMetrics.totalReads * cellMetrics.noScalePlex)
+            )
+        ),
+        3,
     )  # Saturation
-    cellMetrics["topTwo_scaleplex"] = top_two_features(umi_sparse_counts_matrix, cols_mapped)
+    cellMetrics["topTwo_scaleplex"] = top_two_features(
+        umi_sparse_counts_matrix, cols_mapped
+    )
 
     cellMetrics = cellMetrics.reset_index()
 
@@ -308,10 +342,20 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Count ScalePlex sequences matches from bcParser output")
-    parser.add_argument("--bamDir", metavar="BAM_DIR", type=Path, help="Directory containing bcParser output files")
+    parser = argparse.ArgumentParser(
+        description="Count ScalePlex sequences matches from bcParser output"
+    )
     parser.add_argument(
-        "--references", metavar="REFERENCES", type=Path, help="Path to folder containing barcode whitelists"
+        "--bamDir",
+        metavar="BAM_DIR",
+        type=Path,
+        help="Directory containing bcParser output files",
+    )
+    parser.add_argument(
+        "--references",
+        metavar="REFERENCES",
+        type=Path,
+        help="Path to folder containing barcode whitelists",
     )
     parser.add_argument(
         "--lib_struct",
@@ -319,15 +363,28 @@ if __name__ == "__main__":
         type=Path,
         help="library structure json used for bcParser in enrich detection",
     )
-    parser.add_argument("--id", metavar="ID", type=str, help="Sample and lib name for output files")
-    parser.add_argument("--outDir", type=Path, help="Directory for outputs")
-    parser.add_argument("--mapping_file", type=Path, help="Path to scaleplex to rna mapping file")
     parser.add_argument(
-        "--min_read_umi_thresh", type=int, default=1, help="min scaleplex reads for UMI's to be considered a count"
+        "--id", metavar="ID", type=str, help="Sample and lib name for output files"
+    )
+    parser.add_argument("--outDir", type=Path, help="Directory for outputs")
+    parser.add_argument(
+        "--mapping_file", type=Path, help="Path to scaleplex to rna mapping file"
+    )
+    parser.add_argument(
+        "--min_read_umi_thresh",
+        type=int,
+        default=1,
+        help="min scaleplex reads for UMI's to be considered a count",
     )
 
     args = parser.parse_args()
     args.outDir.mkdir(parents=True, exist_ok=True)
     main(
-        args.bamDir, args.references, args.lib_struct, args.id, args.outDir, args.mapping_file, args.min_read_umi_thresh
+        args.bamDir,
+        args.references,
+        args.lib_struct,
+        args.id,
+        args.outDir,
+        args.mapping_file,
+        args.min_read_umi_thresh,
     )

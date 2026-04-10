@@ -29,16 +29,27 @@ def read_genes(sample_specific_file_paths):
         A dataframe of genes (DataFrame)
     """
     features = pl.read_csv(
-        sample_specific_file_paths["features"], separator="\t", has_header=False, columns=[0], new_columns=["ID"]
+        sample_specific_file_paths["features"],
+        separator="\t",
+        has_header=False,
+        columns=[0],
+        new_columns=["ID"],
     )
-    features = features.with_row_index(offset=1)  # add 1-based index column to match entries in mtx file
+    features = features.with_row_index(
+        offset=1
+    )  # add 1-based index column to match entries in mtx file
     features = features.with_columns(
-        pl.when(pl.col("ID").str.starts_with("ENSG")).then(pl.lit("human")).otherwise(pl.lit("mouse")).alias("species")
+        pl.when(pl.col("ID").str.starts_with("ENSG"))
+        .then(pl.lit("human"))
+        .otherwise(pl.lit("mouse"))
+        .alias("species")
     )
     # check that human and mouse genes are not intermixed
     # the species column should only switch one time from the previous row
     if (features["species"] != features["species"].shift(1)).sum() > 1:
-        raise ValueError("Barnyard genomes can not have genes intermixed from different species")
+        raise ValueError(
+            "Barnyard genomes can not have genes intermixed from different species"
+        )
     return features
 
 
@@ -54,7 +65,11 @@ def read_barcodes(sample_specific_file_paths):
     Returns:
         A dataframe of barcodes (DataFrame)
     """
-    barcodes = pl.read_csv(sample_specific_file_paths["barcodes"], has_header=False, new_columns=["cell_id"])
+    barcodes = pl.read_csv(
+        sample_specific_file_paths["barcodes"],
+        has_header=False,
+        new_columns=["cell_id"],
+    )
     barcodes = barcodes.with_row_index(
         name="barcode", offset=1
     )  # add 1-based index column to match entries in mtx file
@@ -138,7 +153,9 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
     Returns:
         An allCells.csv containing metrics computed across all barcodes in this sample (DataFrame)
     """
-    all_cells = count_transcripts(sample_specific_file_paths, genes, barcodes, isBarnyard)
+    all_cells = count_transcripts(
+        sample_specific_file_paths, genes, barcodes, isBarnyard
+    )
     stats_cols = [
         "CB",
         "cbMatch",
@@ -155,7 +172,10 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
         "nUMIunique",
     ]
     read_stats = pl.read_csv(
-        sample_specific_file_paths["stats"], separator="\t", skip_rows_after_header=1, columns=stats_cols
+        sample_specific_file_paths["stats"],
+        separator="\t",
+        skip_rows_after_header=1,
+        columns=stats_cols,
     )  # skip first row of stats file that has row for CBnotInPasslist
 
     # Compute metrics for each barcode
@@ -164,7 +184,10 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
         (pl.col("genomeU") + pl.col("genomeM")).alias("mappedReads"),
         (pl.col("featureU") + pl.col("featureM")).alias("geneReads"),
         (pl.col("countedU") + pl.col("countedM")).alias("countedReads"),
-        (pl.col("mito") / (pl.col("genomeU") + pl.col("genomeM"))).round(3).fill_nan(None).alias("mitoProp"),
+        (pl.col("mito") / (pl.col("genomeU") + pl.col("genomeM")))
+        .round(3)
+        .fill_nan(None)
+        .alias("mitoProp"),
     )
     read_stats = read_stats.rename(
         {
@@ -195,7 +218,10 @@ def build_allCells(sample_specific_file_paths, genes, barcodes, isBarnyard):
         pl.col("antisenseReads"),
         pl.col("mitoReads"),
         pl.col("countedMultiGeneReads"),
-        (pl.lit(1) - pl.col("counts") / pl.col("countedReads")).round(3).fill_nan(None).alias("Saturation"),
+        (pl.lit(1) - pl.col("counts") / pl.col("countedReads"))
+        .round(3)
+        .fill_nan(None)
+        .alias("Saturation"),
         pl.col("mitoProp"),
     )
 
@@ -213,15 +239,23 @@ def split_barcodes(lib_struct: Path, all_cells: pl.DataFrame) -> pd.DataFrame:
     """
     lib_json = LibJsonParser(lib_struct).json_contents
     barcode_info = lib_json["barcodes"]
-    aliases = [bc["alias"] for bc in barcode_info if bc.get("type", None) not in ["library_index", "umi", "target"]]
+    aliases = [
+        bc["alias"]
+        for bc in barcode_info
+        if bc.get("type", None) not in ["library_index", "umi", "target"]
+    ]
     barcodes = all_cells["cell_id"]
     barcodes = barcodes.str.split("+").list.to_struct(fields=aliases).struct.unnest()
     bead_bc_cols = ["bead1", "bead2", "bead3"]
     if all([bc in aliases for bc in bead_bc_cols]):
         # create concatenated bead barcode column
-        barcodes = barcodes.with_columns(pl.concat_str(bead_bc_cols, separator="+").alias("bead_bc"))
+        barcodes = barcodes.with_columns(
+            pl.concat_str(bead_bc_cols, separator="+").alias("bead_bc")
+        )
         bead_bc_cols_to_drop = [
-            bc.get("alias") for bc in barcode_info if bc.get("alias") in bead_bc_cols and not bc.get("plate")
+            bc.get("alias")
+            for bc in barcode_info
+            if bc.get("alias") in bead_bc_cols and not bc.get("plate")
         ]
         barcodes = barcodes.drop(bead_bc_cols_to_drop)
     return all_cells.with_columns(barcodes)
@@ -232,10 +266,17 @@ def main():
 
     # Required and optional arguments for specifying the STARsolo outputs for this sample
     parser.add_argument(
-        "--STARsolo_out", type=Path, required=True, help="Path to the STARsolo outputs for this sample."
+        "--STARsolo_out",
+        type=Path,
+        required=True,
+        help="Path to the STARsolo outputs for this sample.",
     )
     parser.add_argument(
-        "--feature_type", type=str, required=False, default="GeneFull_Ex50pAS", help="STARsolo feature type used."
+        "--feature_type",
+        type=str,
+        required=False,
+        default="GeneFull_Ex50pAS",
+        help="STARsolo feature type used.",
     )
     parser.add_argument(
         "--matrix_type",
@@ -250,24 +291,41 @@ def main():
         action="store_true",
         help="If set, this sample will be interpreted as a barnyard sample (i.e. mixed mouse and human).",
     )
-    parser.add_argument("--threads", type=int, required=False, default=1, help="Number of threads for duckdb")
-    parser.add_argument("--memory", type=str, required=False, default="8 GB", help="Memory allocated to task")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for duckdb",
+    )
+    parser.add_argument(
+        "--memory",
+        type=str,
+        required=False,
+        default="8 GB",
+        help="Memory allocated to task",
+    )
 
     # Optional argument to specify the name of the sample for which cells are being called
     parser.add_argument(
-        "--sample", type=str, required=False, default="example", help="Unique string to identify this sample."
+        "--sample",
+        type=str,
+        required=False,
+        default="example",
+        help="Unique string to identify this sample.",
     )
 
     # Optional argument to specify the library structure for this sample
     parser.add_argument(
-        "--libStruct", type=Path, required=False, help="Path to the library structure json for this sample."
+        "--libStruct",
+        type=Path,
+        required=False,
+        help="Path to the library structure json for this sample.",
     )
 
     args = parser.parse_args()
     mem_limit, mem_unit = args.memory.split()
-    mem_limit = (
-        f"{float(mem_limit) / (args.threads + 1):.1f}{mem_unit}"  # allocate duckdb memory based on number of threads
-    )
+    mem_limit = f"{float(mem_limit) / (args.threads + 1):.1f}{mem_unit}"  # allocate duckdb memory based on number of threads
     duckdb.sql(
         f"""
     SET threads TO {args.threads};
@@ -280,7 +338,9 @@ def main():
     )
     genes = read_genes(sample_specific_file_paths)
     barcodes = read_barcodes(sample_specific_file_paths)
-    allCells = build_allCells(sample_specific_file_paths, genes, barcodes, args.isBarnyard)
+    allCells = build_allCells(
+        sample_specific_file_paths, genes, barcodes, args.isBarnyard
+    )
 
     if args.libStruct is not None:
         allCells = split_barcodes(args.libStruct, allCells)

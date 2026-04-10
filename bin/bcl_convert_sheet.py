@@ -90,10 +90,15 @@ def load_libDef(lib_json_obj: LibJsonParser) -> Dict[str, Any]:
     if bclOpts.get("library_barcodes"):
         if isinstance(bclOpts["library_barcodes"], dict):
             # bclOpts["library_barcodes"]["sequences"] evaluates to index1Seqs or index2Seqs
-            res["library_barcodes"] = lib_json_obj.parent_dir / bclOpts[bclOpts["library_barcodes"]["sequences"]]
+            res["library_barcodes"] = (
+                lib_json_obj.parent_dir
+                / bclOpts[bclOpts["library_barcodes"]["sequences"]]
+            )
             res["libIndexUsed"] = bclOpts["library_barcodes"]["libIndexUsed"]
         else:
-            res["library_barcodes"] = lib_json_obj.parent_dir / bclOpts["library_barcodes"]
+            res["library_barcodes"] = (
+                lib_json_obj.parent_dir / bclOpts["library_barcodes"]
+            )
     res["uniqueDualIndex"] = bclOpts.get("uniqueDualIndex", False)
     res["index2RevComp"] = bclOpts.get("index2RevComp", False)
     res["split_on"] = bclOpts.get("split_on")
@@ -137,7 +142,9 @@ def load_run(runInfo: Path) -> Dict[str, ReadInfo]:
     return reads
 
 
-def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]], libDef: Dict[str, str]) -> List[Library]:
+def load_libraries(
+    samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]], libDef: Dict[str, str]
+) -> List[Library]:
     """
     Load information about library demux (Illumina / fastq samples) from samples.csv
 
@@ -187,7 +194,10 @@ def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]], libDe
                         else:
                             lib.index2.append(s)
             else:
-                if libDef["libIndexUsed"] == "libIndex2" or libDef["libIndexUsed"] == "scalePlexLibIndex":
+                if (
+                    libDef["libIndexUsed"] == "libIndex2"
+                    or libDef["libIndexUsed"] == "scalePlexLibIndex"
+                ):
                     # default in all library index2 sequences
                     for seqs in namedIndexSeqs.values():
                         lib.index2.extend(seqs)
@@ -203,7 +213,12 @@ def load_libraries(samplesCsv: Path, namedIndexSeqs: Dict[str, List[str]], libDe
     return list(libs.values())
 
 
-def assign_index(libraries: List[Library], libDef: Dict, reads: Dict[str, ReadInfo], lib_json_obj: LibJsonParser) -> IndexInfo:
+def assign_index(
+    libraries: List[Library],
+    libDef: Dict,
+    reads: Dict[str, ReadInfo],
+    lib_json_obj: LibJsonParser,
+) -> IndexInfo:
     """
     Finalize index sequences for each library (fastq sample)
 
@@ -256,7 +271,14 @@ def print_settings(settings: Dict):
         print(f"{s},{v}")
 
 
-def main(samplesCsv: Path, lib_json_obj: LibJsonParser, runInfo: Path, splitFastq: bool, settings: dict[str, str], libDef: dict):
+def main(
+    samplesCsv: Path,
+    lib_json_obj: LibJsonParser,
+    runInfo: Path,
+    splitFastq: bool,
+    settings: dict[str, str],
+    libDef: dict,
+):
     """
     Prepare the bcl_convert samplesheet.csv and print to stdout
 
@@ -330,18 +352,24 @@ def main(samplesCsv: Path, lib_json_obj: LibJsonParser, runInfo: Path, splitFast
             for lib in libs:
                 for bc1_name, seq1 in indexSeqs1.items():
                     for bc2_name, seq2 in indexSeqs2.items():
-                        if seq1 in lib.index1 and (all(seq in lib.index2 for seq in seq2) or seq2 in lib.index2):
+                        if seq1 in lib.index1 and (
+                            all(seq in lib.index2 for seq in seq2) or seq2 in lib.index2
+                        ):
                             # For Quantum the library barcode and index2 barcode are the same for the purpose of bcl convert
                             if libDef["index2Seqs"] == libDef["library_barcodes"]:
                                 subLib = Library(name=f"{lib.name}_{bc1_name}")
                             else:
-                                subLib = Library(name=f"{lib.name}_{bc1_name}_{bc2_name}")
+                                subLib = Library(
+                                    name=f"{lib.name}_{bc1_name}_{bc2_name}"
+                                )
                             subLib.index1 = seq1
                             subLib.index2 = seq2
                             splitSamples.append(subLib)
             libs = splitSamples
     else:
-        raise Exception("Valid value of split_on not provided. Please provide either index1 or index2")
+        raise Exception(
+            "Valid value of split_on not provided. Please provide either index1 or index2"
+        )
     # If an index read is not used for library / fastq demux,
     # we need to define it as a 'UMI' in OverrideCycles
     overrideCycles = []
@@ -349,11 +377,17 @@ def main(samplesCsv: Path, lib_json_obj: LibJsonParser, runInfo: Path, splitFast
         if not readInfo.isIndex:
             overrideCycles.append(f"Y{readInfo.bp}")
         else:
-            if (indexInfo.index1Used and readName == "I1") or (indexInfo.index2Used and readName == "I2"):
+            if (indexInfo.index1Used and readName == "I1") or (
+                indexInfo.index2Used and readName == "I2"
+            ):
                 if readName == "I1" and libDef.get("index1BClen"):
-                    overrideCycles.append(f"I{libDef['index1BClen']}U{int(readInfo.bp) - int(libDef['index1BClen'])}")
+                    overrideCycles.append(
+                        f"I{libDef['index1BClen']}U{int(readInfo.bp) - int(libDef['index1BClen'])}"
+                    )
                 elif readName == "I2" and libDef.get("index2BClen"):
-                    overrideCycles.append(f"U{int(readInfo.bp) - int(libDef['index2BClen'])}I{libDef['index2BClen']}")
+                    overrideCycles.append(
+                        f"U{int(readInfo.bp) - int(libDef['index2BClen'])}I{libDef['index2BClen']}"
+                    )
                 else:
                     overrideCycles.append(f"I{readInfo.bp}")
             else:
@@ -403,13 +437,29 @@ def main(samplesCsv: Path, lib_json_obj: LibJsonParser, runInfo: Path, splitFast
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create bcl_convert samplesheet.csv " "from workflow samples.csv")
-    parser.add_argument(
-        "samples", metavar="SAMPLES.csv", type=Path, help="CSV with samples and index sequences for scATAC workflow run"
+    parser = argparse.ArgumentParser(
+        description="Create bcl_convert samplesheet.csv " "from workflow samples.csv"
     )
-    parser.add_argument("libDef", metavar="LIBRARY.json", type=Path, help="Library structure definition")
-    parser.add_argument("runinfo", metavar="RUNINFO.xml", type=Path, help="Sequencer runinfo (in runfolder)")
-    parser.add_argument("--splitFastq", action="store_true", help="Split sample by PCR index barcode sequence")
+    parser.add_argument(
+        "samples",
+        metavar="SAMPLES.csv",
+        type=Path,
+        help="CSV with samples and index sequences for scATAC workflow run",
+    )
+    parser.add_argument(
+        "libDef", metavar="LIBRARY.json", type=Path, help="Library structure definition"
+    )
+    parser.add_argument(
+        "runinfo",
+        metavar="RUNINFO.xml",
+        type=Path,
+        help="Sequencer runinfo (in runfolder)",
+    )
+    parser.add_argument(
+        "--splitFastq",
+        action="store_true",
+        help="Split sample by PCR index barcode sequence",
+    )
     args = parser.parse_args()
 
     lib_json_obj = LibJsonParser(args.libDef)

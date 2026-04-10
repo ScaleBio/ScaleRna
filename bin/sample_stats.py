@@ -25,16 +25,22 @@ def parse_star_log(reads: dict[str, float], star_log: Path) -> dict[str, float]:
     with open(star_log, "r") as f:
         for line in f:
             if "Average input read length" in line:
-                reads["avg_trimmed_read_len"] = float(line.split("Average input read length |")[1].strip())
+                reads["avg_trimmed_read_len"] = float(
+                    line.split("Average input read length |")[1].strip()
+                )
             if "Average mapped length" in line:
-                reads["avg_mapped_len"] = float(line.split("Average mapped length |")[1].strip())
+                reads["avg_mapped_len"] = float(
+                    line.split("Average mapped length |")[1].strip()
+                )
             if "Mismatch rate per base, % |" in line:
                 reads["mismatch_rate_per_base_perc"] = float(
                     line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]
                 )
             if "% of reads mapped to too many loci |" in line:
                 reads["mapped_to_too_many_loci_perc"] = float(
-                    line.split("% of reads mapped to too many loci |")[1].strip().split("%")[0]
+                    line.split("% of reads mapped to too many loci |")[1]
+                    .strip()
+                    .split("%")[0]
                 )
     return reads
 
@@ -131,8 +137,14 @@ def calculate_sample_stats(
     if is_cellFinder:
         cells["cellFinder_calls"] = query_results["cellFinder_calls"]
     elif is_barnyard:
-        utc_by = [i for i in [query_results["mouse_utc"], query_results["human_utc"]] if i is not None]
-        cells["utc_threshold"] = np.min(utc_by) if utc_by else query_results["utc_threshold"]
+        utc_by = [
+            i
+            for i in [query_results["mouse_utc"], query_results["human_utc"]]
+            if i is not None
+        ]
+        cells["utc_threshold"] = (
+            np.min(utc_by) if utc_by else query_results["utc_threshold"]
+        )
     else:
         cells["utc_threshold"] = query_results["utc_threshold"]
     if filter_outliers:
@@ -163,14 +175,18 @@ def calculate_sample_stats(
     unique_reads = []
     target_mean_reads = [100, 500, 1000, 5000, 10000, 20000]
     for d in target_mean_reads:
-        if cells["reads_per_cell"] == 0 or (d >= cells["reads_per_cell"] and not internal_report):
+        if cells["reads_per_cell"] == 0 or (
+            d >= cells["reads_per_cell"] and not internal_report
+        ):
             complexity[f"target_reads_{d}"] = np.nan
         else:
             # Target reads refers to the mean reads per cell, but we are estimating
             # UMIs / complexity in the median cell. Approx. scaling median reads by the same
             # factor as mean reads.
             target_median_reads = (d / cells["reads_per_cell"]) * cells["median_reads"]
-            unique_reads = extrapolate_unique(cells["median_reads"], cells["median_utc"], target_median_reads)
+            unique_reads = extrapolate_unique(
+                cells["median_reads"], cells["median_utc"], target_median_reads
+            )
             complexity[f"target_reads_{d}"] = unique_reads
 
     stats_stats_df = pd.DataFrame(
@@ -189,7 +205,11 @@ def main():
 
     # Required argument for specifying the path to the sampleMetrics parquet file
     parser.add_argument(
-        "--cellMetrics", nargs="+", type=Path, required=True, help="Path to the barcodes parquet file(s)."
+        "--cellMetrics",
+        nargs="+",
+        type=Path,
+        required=True,
+        help="Path to the barcodes parquet file(s).",
     )
 
     # CellFinder parameters
@@ -204,14 +224,37 @@ def main():
         required=False,
         action="store_true",
     )
-    parser.add_argument("--starLog", type=Path, required=True, help="Path to the STARsolo log file.")
-    parser.add_argument("--sample", type=str, required=True, help="Unique string to identify this sample.")
-    parser.add_argument("--totalSampleReads", type=int, help="Total sample reads, obtained from bcParser")
+    parser.add_argument(
+        "--starLog", type=Path, required=True, help="Path to the STARsolo log file."
+    )
+    parser.add_argument(
+        "--sample",
+        type=str,
+        required=True,
+        help="Unique string to identify this sample.",
+    )
+    parser.add_argument(
+        "--totalSampleReads",
+        type=int,
+        help="Total sample reads, obtained from bcParser",
+    )
     # Optional argument to specify whether to generate statistics for internal report
     parser.add_argument("--internalReport", action="store_true", default=False)
     parser.add_argument("--isBarnyard", action="store_true", default=False)
-    parser.add_argument("--threads", type=int, required=False, default=1, help="Number of threads for duckdb")
-    parser.add_argument("--memory", type=str, required=False, default="8 GB", help="Memory allocated to task")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for duckdb",
+    )
+    parser.add_argument(
+        "--memory",
+        type=str,
+        required=False,
+        default="8 GB",
+        help="Memory allocated to task",
+    )
 
     args = parser.parse_args()
 

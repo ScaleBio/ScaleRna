@@ -74,7 +74,9 @@ def extrapolate_unique(reads: int, umis: int, targetReads: int) -> float:
     estimatedLibrarySize = estLibSize(reads, umis)
     # Estimate the number of unique reads expected when sequencing targetReads from estLibSize unique molecules
     # (Sampling with replacement)
-    res = estimatedLibrarySize * (1 - (((estimatedLibrarySize - 1) / (estimatedLibrarySize)) ** targetReads))
+    res = estimatedLibrarySize * (
+        1 - (((estimatedLibrarySize - 1) / (estimatedLibrarySize)) ** targetReads)
+    )
     return int(res) if not np.isnan(res) else res
 
 
@@ -97,4 +99,7 @@ def calculate_weighted_average(
     """
     if sum(weights) == 0:
         raise ZeroDivisionError(msg)
-    return round(sum(weights[i] * values[i] for i in range(len(weights))) / sum(weights), precision)
+    return round(
+        sum(weights[i] * values[i] for i in range(len(weights))) / sum(weights),
+        precision,
+    )

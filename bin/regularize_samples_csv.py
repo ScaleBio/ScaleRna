@@ -31,7 +31,7 @@ COL_NAMES_WHITELIST = [
     "group",
     "resultDir",
     "rnaId",
-    "expectedCells"
+    "expectedCells",
 ]
 
 
@@ -78,7 +78,9 @@ def fail(msg: str, sep=" "):
     sys.exit(42)
 
 
-def unwrapSemiColonSeparatedValues(cols: list, rows: list, index: int, scale_plex_col_name: str) -> list:
+def unwrapSemiColonSeparatedValues(
+    cols: list, rows: list, index: int, scale_plex_col_name: str
+) -> list:
     """
     Unwrap each entry separated by a semi-colon into its own row
 
@@ -100,7 +102,9 @@ def unwrapSemiColonSeparatedValues(cols: list, rows: list, index: int, scale_ple
             split_scaleplexLibs = []
             if scale_plex_col_name in cols:
                 split_scaleplexLibs = r[cols.index(scale_plex_col_name)].split(";")
-                split_scaleplexLibs = [libname.strip() for libname in split_scaleplexLibs]
+                split_scaleplexLibs = [
+                    libname.strip() for libname in split_scaleplexLibs
+                ]
                 if len(split_libs) != len(split_scaleplexLibs):
                     fail(
                         f"Number of scalePlex entries {r[cols.index(scale_plex_col_name)]} "
@@ -110,14 +114,18 @@ def unwrapSemiColonSeparatedValues(cols: list, rows: list, index: int, scale_ple
                 unwrapped_row = r[:]
                 unwrapped_row[index] = split_libname
                 if split_scaleplexLibs:
-                    unwrapped_row[cols.index(scale_plex_col_name)] = split_scaleplexLibs[idx]
+                    unwrapped_row[cols.index(scale_plex_col_name)] = (
+                        split_scaleplexLibs[idx]
+                    )
                 final_rows.append(unwrapped_row)
         else:
             final_rows.append(r)
     return final_rows
 
 
-def readSamplesCsv(samplesCsv: Path, quantum: bool, fastq_input: bool, reporting: bool) -> tuple[list, list[list[str]]]:
+def readSamplesCsv(
+    samplesCsv: Path, quantum: bool, fastq_input: bool, reporting: bool
+) -> tuple[list, list[list[str]]]:
     """
     Load samples.csv into a list.
 
@@ -142,7 +150,11 @@ def readSamplesCsv(samplesCsv: Path, quantum: bool, fastq_input: bool, reporting
         cols = next(samples)  # CSV column header (in same order as values in rows)
         # Normalize column names
         cols = [
-            col_names_mapping[col.lower()] if col.lower() in col_names_mapping else fail(f"Invalid column name {col}")
+            (
+                col_names_mapping[col.lower()]
+                if col.lower() in col_names_mapping
+                else fail(f"Invalid column name {col}")
+            )
             for col in cols
         ]
         # Trim empty columns
@@ -174,10 +186,14 @@ def readSamplesCsv(samplesCsv: Path, quantum: bool, fastq_input: bool, reporting
                 fail("Cannot list multiple libIndex if listing multiple libName")
     if quantum and not reporting:
         if "libIndex2" in cols and "libName" in cols:
-            fail("Please provide a value for only the libIndex2 column or the libName column, not both")
+            fail(
+                "Please provide a value for only the libIndex2 column or the libName column, not both"
+            )
         if not fastq_input:
             if "libName" in cols:
-                fail("When starting from bcl files, do not provide a value for the libName column")
+                fail(
+                    "When starting from bcl files, do not provide a value for the libName column"
+                )
     # Normalize index sequences
     for idx_col in ["libIndex", "libIndex2", "scalePlexLibIndex", "scalePlexLibIndex2"]:
         if idx_col in cols:
@@ -188,18 +204,24 @@ def readSamplesCsv(samplesCsv: Path, quantum: bool, fastq_input: bool, reporting
                 r[cols.index(idx_col)] = index
     final_rows = []
     if quantum and "libName" in cols:
-        final_rows = unwrapSemiColonSeparatedValues(cols, rows, cols.index("libName"), "scalePlexLibName")
+        final_rows = unwrapSemiColonSeparatedValues(
+            cols, rows, cols.index("libName"), "scalePlexLibName"
+        )
     else:
         final_rows = rows
     if quantum and "libIndex2" in cols:
-        final_rows = unwrapSemiColonSeparatedValues(cols, final_rows, cols.index("libIndex2"), "scalePlexLibIndex2")
+        final_rows = unwrapSemiColonSeparatedValues(
+            cols, final_rows, cols.index("libIndex2"), "scalePlexLibIndex2"
+        )
     else:
         final_rows = final_rows
 
     return cols, final_rows
 
 
-def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, sample_barcode_fname: Path):
+def check_whether_barcode_ranges_overlap(
+    all_samples_barcode_range: Dict, sample_barcode_fname: Path
+):
     """
     Check whether the user supplied barcode ranges overlap amongst samples
     Throw exception if there is an overlap
@@ -208,7 +230,9 @@ def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, sample
         all_samples_barcode_range: Dictionary of barcode ranges for all samples with libName as key
         sample_barcode_fname: Path to sample barcode whitelist file
     """
-    barcode_whitelist = pd.read_csv(sample_barcode_fname, sep="\t", names=["well", "barcode"])
+    barcode_whitelist = pd.read_csv(
+        sample_barcode_fname, sep="\t", names=["well", "barcode"]
+    )
     for libName in all_samples_barcode_range:
         # Needs to be rest for each libName
         verbose_barcodes_list = []
@@ -217,11 +241,13 @@ def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, sample
             for semi_colon_separated in sample_barcodes.split(";"):
                 if "-" in semi_colon_separated:
                     # Get well coordinate that corresponds to starting of the barcodes range for a sample
-                    starting = barcode_whitelist.index[barcode_whitelist["well"] == semi_colon_separated.split("-")[0]][
-                        0
-                    ]
+                    starting = barcode_whitelist.index[
+                        barcode_whitelist["well"] == semi_colon_separated.split("-")[0]
+                    ][0]
                     # Get well coordinate that corresponds to end of the barcodes range for a sample
-                    end = barcode_whitelist.index[barcode_whitelist["well"] == semi_colon_separated.split("-")[1]][0]
+                    end = barcode_whitelist.index[
+                        barcode_whitelist["well"] == semi_colon_separated.split("-")[1]
+                    ][0]
                     # Retrieve all the well coordinates that correspond to the barcodes range for a sample
                     all_barcodes = barcode_whitelist.loc[starting:end, "well"].tolist()
                     # extend because all_barcodes is a list
@@ -230,7 +256,9 @@ def check_whether_barcode_ranges_overlap(all_samples_barcode_range: Dict, sample
                     verbose_barcodes_list.append(semi_colon_separated)
         # Check whether the barcode ranges overlap amongst individual samples
         if len(verbose_barcodes_list) != len(set(verbose_barcodes_list)):
-            fail("The barcodes range mentioned for each sample overlap amongst individual samples")
+            fail(
+                "The barcodes range mentioned for each sample overlap amongst individual samples"
+            )
 
 
 def get_first_and_last_entry(file: Path, sep: str = "\t") -> tuple[str, str]:
@@ -250,7 +278,9 @@ def get_first_and_last_entry(file: Path, sep: str = "\t") -> tuple[str, str]:
     return first_entry, last_entry
 
 
-def write_unwrapped_barcodes_range_samples_csv(cols: list, rows: list, sample_barcode_fname: Path):
+def write_unwrapped_barcodes_range_samples_csv(
+    cols: list, rows: list, sample_barcode_fname: Path
+):
     """
     Write a csv with a singular well coordinate for the barcodes column on each line with same id,
     sample name and library name
@@ -262,15 +292,22 @@ def write_unwrapped_barcodes_range_samples_csv(cols: list, rows: list, sample_ba
         sample_barcode_fname: Path to sample barcode whitelist file
     """
     unwrapped_rows = []
-    barcode_whitelist_wells = pd.read_csv(sample_barcode_fname, sep="\t", names=["well", "barcode"])["well"].to_list()
+    barcode_whitelist_wells = pd.read_csv(
+        sample_barcode_fname, sep="\t", names=["well", "barcode"]
+    )["well"].to_list()
     for r in rows:
         unwrapped_rows.append(
             unwrap_barcodes_range(
-                r[cols.index("barcodes")], r[cols.index("id")], r[cols.index("libName")], barcode_whitelist_wells
+                r[cols.index("barcodes")],
+                r[cols.index("id")],
+                r[cols.index("libName")],
+                barcode_whitelist_wells,
             )
         )
     flattened_unwrapped_rows = [
-        item for sublist in unwrapped_rows for item in (sublist if isinstance(sublist, list) else [sublist])
+        item
+        for sublist in unwrapped_rows
+        for item in (sublist if isinstance(sublist, list) else [sublist])
     ]
     with open("barcode_range_unwrapped_samples.csv", "w", newline="") as file:
         writer = csv.writer(file)
@@ -316,11 +353,15 @@ def unwrap_barcodes_range(
         split_barcodes = barcodes_range.split(";")
         for split_barcode in split_barcodes:
             if "-" in split_barcode:
-                unwrapped_barcodes.extend(get_all_barcodes_in_range(split_barcode, barcode_whitelist_wells))
+                unwrapped_barcodes.extend(
+                    get_all_barcodes_in_range(split_barcode, barcode_whitelist_wells)
+                )
             else:
                 unwrapped_barcodes.append(split_barcode)
     elif "-" in barcodes_range:
-        unwrapped_barcodes = get_all_barcodes_in_range(barcodes_range, barcode_whitelist_wells)
+        unwrapped_barcodes = get_all_barcodes_in_range(
+            barcodes_range, barcode_whitelist_wells
+        )
     else:
         return (sample_id, libName, barcodes_range)
     return [(sample_id, libName, barcode) for barcode in unwrapped_barcodes]
@@ -360,7 +401,9 @@ def add_all_alias_for_index(
                 if scaleplex_alias:
                     r_copy.insert(cols.index(scaleplex_col_name), scaleplex_alias)
                 else:
-                    fail(f"ScalePlex alias not found for {alias} in {scaleplex_to_rna_mapping}")
+                    fail(
+                        f"ScalePlex alias not found for {alias} in {scaleplex_to_rna_mapping}"
+                    )
             rows_with_all_aliases.append(r_copy)
 
     return rows_with_all_aliases
@@ -395,7 +438,11 @@ def main(
         fastq_input: Flag to indicate that fastq files will be used as input to the workflow
     """
     lib_json_obj = LibJsonParser(libraryStruct)
-    sample_barcode_whitelist_first_entry, sample_barcode_whitelist_second_entry = lib_json_obj.get_barcodes_range_of_whitelist_file(lib_json_obj.sample_barcode_fname)
+    sample_barcode_whitelist_first_entry, sample_barcode_whitelist_second_entry = (
+        lib_json_obj.get_barcodes_range_of_whitelist_file(
+            lib_json_obj.sample_barcode_fname
+        )
+    )
     barcodes_range = f"{sample_barcode_whitelist_first_entry}-{sample_barcode_whitelist_second_entry}"
     # Load column headers and all lines from the csv into lists
     cols, rows = readSamplesCsv(samplesCsv, quantum, fastq_input, reporting)
@@ -409,7 +456,9 @@ def main(
                     if "scalePlexLibIndex2" not in cols:
                         cols.insert(len(cols), "scalePlexLibIndex2")
                     else:
-                        fail("Can not specify scalePlexLibIndex2 without libIndex2 in samples.csv")
+                        fail(
+                            "Can not specify scalePlexLibIndex2 without libIndex2 in samples.csv"
+                        )
                 rows = add_all_alias_for_index(
                     cols,
                     rows,
@@ -421,7 +470,9 @@ def main(
                 if scalePlex:
                     # Default scalePlexLibName based on scalePlexLibIndex2 value added in add_all_alias_for_index
                     if "scalePlexLibName" in cols:
-                        fail("Can not specify scalePlexLibName without libName in samples.csv")
+                        fail(
+                            "Can not specify scalePlexLibName without libName in samples.csv"
+                        )
                     idx = cols.index("scalePlexLibIndex2")
                     for r in rows:
                         r.insert(idx, r[cols.index("scalePlexLibIndex2")])
@@ -473,7 +524,9 @@ def main(
                 else:
                     r[barcodesIndex] = r[barcodesIndex].replace(" ", "")
                     all_samples_barcode_range[r[libNameIndex]].append(r[barcodesIndex])
-        check_whether_barcode_ranges_overlap(all_samples_barcode_range, lib_json_obj.sample_barcode_fname)
+        check_whether_barcode_ranges_overlap(
+            all_samples_barcode_range, lib_json_obj.sample_barcode_fname
+        )
         if splitFastq:
             if "split" not in cols:
                 cols.append("split")
@@ -501,21 +554,33 @@ def main(
             if "scalePlexLibName" in cols:
                 hash_lib_name = r[cols.index("scalePlexLibName")]
                 if hash_lib_name == r[cols.index("libName")]:
-                    fail(f"ScalePlex library name must be distinct from RNA library name: {hash_lib_name}")
+                    fail(
+                        f"ScalePlex library name must be distinct from RNA library name: {hash_lib_name}"
+                    )
                 hash_row[cols.index("libName")] = hash_lib_name
             else:
                 if quantum and "libIndex2" in cols:
-                    hash_row[cols.index("libName")] = rna_to_scaleplex_mapping[r[cols.index("libIndex2")]]
+                    hash_row[cols.index("libName")] = rna_to_scaleplex_mapping[
+                        r[cols.index("libIndex2")]
+                    ]
                 else:
-                    hash_row[cols.index("libName")] = f"{r[cols.index('libName')]}-ScalePlex"
+                    hash_row[cols.index("libName")] = (
+                        f"{r[cols.index('libName')]}-ScalePlex"
+                    )
             if "scalePlexLibIndex" in cols or "scalePlexLibIndex2" in cols:
                 if quantum:
-                    hash_row[cols.index("libIndex2")] = r[cols.index("scalePlexLibIndex2")]
+                    hash_row[cols.index("libIndex2")] = r[
+                        cols.index("scalePlexLibIndex2")
+                    ]
                 else:
-                    hash_row[cols.index("libIndex")] = r[cols.index("scalePlexLibIndex")]
+                    hash_row[cols.index("libIndex")] = r[
+                        cols.index("scalePlexLibIndex")
+                    ]
             else:
                 if quantum and "libIndex2" in cols:
-                    hash_row[cols.index("libIndex2")] = rna_to_scaleplex_mapping[r[cols.index("libIndex2")]]
+                    hash_row[cols.index("libIndex2")] = rna_to_scaleplex_mapping[
+                        r[cols.index("libIndex2")]
+                    ]
                 if "libIndex" in cols:
                     libIndex = r[cols.index("libIndex")]
                     if all(char in "ACGTacgt;" for char in libIndex):
@@ -524,7 +589,9 @@ def main(
                         hash_row[cols.index("libIndex")] = ""
                     else:
                         # set to corresponding hash library named index seq
-                        hash_row[cols.index("libIndex")] = libIndex.replace("RNA", "ScalePlex")
+                        hash_row[cols.index("libIndex")] = libIndex.replace(
+                            "RNA", "ScalePlex"
+                        )
             # Add rnaId
             hash_row.append(r[cols.index("id")])
             # drop id, new one will be created
@@ -534,7 +601,9 @@ def main(
         rows.extend(hash_rows)
         drop_hash_cols(cols, rows)
     if ultima:
-        write_unwrapped_barcodes_range_samples_csv(cols, rows, lib_json_obj.sample_barcode_fname)
+        write_unwrapped_barcodes_range_samples_csv(
+            cols, rows, lib_json_obj.sample_barcode_fname
+        )
     with open(samples_csv_fname, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -546,7 +615,9 @@ if __name__ == "__main__":
         description="Standardize samples.csv for the workflow (defaults, column names, etc."
     )
     parser.add_argument(
-        "samples", metavar="SAMPLES.csv", help="CSV with sample names and information for the workflow run"
+        "samples",
+        metavar="SAMPLES.csv",
+        help="CSV with sample names and information for the workflow run",
     )
     parser.add_argument(
         "--splitSample",
@@ -555,15 +626,28 @@ if __name__ == "__main__":
         default=False,
     )
     parser.add_argument(
-        "--reporting", help="set for use in merging/reporting only workflow", action="store_true", default=False
+        "--reporting",
+        help="set for use in merging/reporting only workflow",
+        action="store_true",
+        default=False,
     )
     parser.add_argument(
-        "--resultDir", help="Previous pipeline output directory (used as default for 'resultDir column)"
+        "--resultDir",
+        help="Previous pipeline output directory (used as default for 'resultDir column)",
     )
-    parser.add_argument("--libraryStruct", help="Library structure json file", type=Path)
-    parser.add_argument("--scalePlexToRnaMapping", type=Path, help="Path to scaleplex to rna mapping file")
     parser.add_argument(
-        "--scalePlex", help="Flag to indicate samples have matched hash libraries", action="store_true", default=False
+        "--libraryStruct", help="Library structure json file", type=Path
+    )
+    parser.add_argument(
+        "--scalePlexToRnaMapping",
+        type=Path,
+        help="Path to scaleplex to rna mapping file",
+    )
+    parser.add_argument(
+        "--scalePlex",
+        help="Flag to indicate samples have matched hash libraries",
+        action="store_true",
+        default=False,
     )
     parser.add_argument(
         "--quantum",
@@ -577,7 +661,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
     )
-    parser.add_argument("--samples_csv_fname", help="Name of the samples.csv file", type=str, default="samples.csv")
+    parser.add_argument(
+        "--samples_csv_fname",
+        help="Name of the samples.csv file",
+        type=str,
+        default="samples.csv",
+    )
     parser.add_argument(
         "--fastq",
         help="Flag to indicate that fastq files will be used as input to the workflow",

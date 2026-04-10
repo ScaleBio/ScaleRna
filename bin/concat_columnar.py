@@ -35,11 +35,19 @@ def concat_files(files: list[Path], cols: list[str], output_file: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser("Vertically stack columnar data files, e.g. csv/parquet")
+    parser = argparse.ArgumentParser(
+        "Vertically stack columnar data files, e.g. csv/parquet"
+    )
     parser.add_argument("inputFiles", nargs="+", type=Path, help="Files to merge")
-    parser.add_argument("--outputFile", required=True, type=Path, help="Output path for merged file")
     parser.add_argument(
-        "--columns", nargs="+", default="*", type=str, help="duckdb syntax for subset of columns to include"
+        "--outputFile", required=True, type=Path, help="Output path for merged file"
+    )
+    parser.add_argument(
+        "--columns",
+        nargs="+",
+        default="*",
+        type=str,
+        help="duckdb syntax for subset of columns to include",
     )
     args = parser.parse_args()
 

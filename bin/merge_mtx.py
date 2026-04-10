@@ -26,7 +26,9 @@ def merge_mtx(id: str, mtx_files: list[Path]):
 
 def main():
     parser = argparse.ArgumentParser("Merge individual umi count matrices for sample")
-    parser.add_argument("raw_mtx", nargs="+", type=Path, help="sparse coordinate mtx files to merge")
+    parser.add_argument(
+        "raw_mtx", nargs="+", type=Path, help="sparse coordinate mtx files to merge"
+    )
     parser.add_argument("--id", required=True, help="Sample and lib name")
     args = parser.parse_args()
 

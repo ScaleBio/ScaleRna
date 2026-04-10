@@ -55,7 +55,9 @@ def add_features_to_anndata(feature_file: Path, dest_file: Path) -> None:
         cols = ["gene_id", "gene_symbol", "annotation"]
 
         # Read features.tsv
-        gene_dat = pandas.read_csv(filepath_or_buffer=feature_file, sep="\t", names=cols)
+        gene_dat = pandas.read_csv(
+            filepath_or_buffer=feature_file, sep="\t", names=cols
+        )
 
         if "var" in hdf:
             # Create "var" group in HDF5 and add attributes
@@ -70,13 +72,19 @@ def add_features_to_anndata(feature_file: Path, dest_file: Path) -> None:
 
         for col in cols:
             var.create_dataset(
-                col, data=gene_dat[col].tolist(), dtype=h5py.string_dtype(), compression="gzip", chunks=True
+                col,
+                data=gene_dat[col].tolist(),
+                dtype=h5py.string_dtype(),
+                compression="gzip",
+                chunks=True,
             )
 
     print(f"Added {feature_file} to {dest_file}")
 
 
-def add_all_cells_to_anndata(all_cells: Path, dest_file: Path, mtx_shape: dict, chunk_size: int = 10000) -> None:
+def add_all_cells_to_anndata(
+    all_cells: Path, dest_file: Path, mtx_shape: dict, chunk_size: int = 10000
+) -> None:
     """
     Adds cell metadata from a CSV file to the HDF5 AnnData file.
 
@@ -89,7 +97,9 @@ def add_all_cells_to_anndata(all_cells: Path, dest_file: Path, mtx_shape: dict, 
     with h5py.File(dest_file, "r+") as hdf:
         # Read initial rows to determine column names and data types
         csv_chunk = pandas.read_csv(
-            all_cells, nrows=100, dtype={"flags": "str", "classification": "str", "species": "str"}
+            all_cells,
+            nrows=100,
+            dtype={"flags": "str", "classification": "str", "species": "str"},
         )
         dtypes = dict(csv_chunk.dtypes)
         cols = list(dtypes.keys())
@@ -110,7 +120,12 @@ def add_all_cells_to_anndata(all_cells: Path, dest_file: Path, mtx_shape: dict, 
                 dtype = dtypes[col]
 
             datasets[col] = obs.create_dataset(
-                col, shape=(0,), maxshape=(mtx_shape["cells"],), dtype=dtype, compression="gzip", chunks=True
+                col,
+                shape=(0,),
+                maxshape=(mtx_shape["cells"],),
+                dtype=dtype,
+                compression="gzip",
+                chunks=True,
             )
 
         # Read the CSV file in chunks and append to datasets
@@ -131,7 +146,9 @@ def add_all_cells_to_anndata(all_cells: Path, dest_file: Path, mtx_shape: dict, 
     print(f"Added {all_cells} to {dest_file}")
 
 
-def add_mtx_to_anndata(mtx_file: Path, dest_file: Path, mtx_shape: dict, chunk_size: int = 10000) -> None:
+def add_mtx_to_anndata(
+    mtx_file: Path, dest_file: Path, mtx_shape: dict, chunk_size: int = 10000
+) -> None:
     """
     Adds sparse matrix data from the Matrix Market file to the HDF5 AnnData file.
 
@@ -151,7 +168,11 @@ def add_mtx_to_anndata(mtx_file: Path, dest_file: Path, mtx_shape: dict, chunk_s
             "data", dtype=np.float32, shape=(n_counts,), chunks=True, compression="gzip"
         )  # Nonzero values from .mtx
         mtx_ind = hdf_mtx.create_dataset(
-            "indices", dtype=np.int32, shape=(n_counts,), chunks=True, compression="gzip"
+            "indices",
+            dtype=np.int32,
+            shape=(n_counts,),
+            chunks=True,
+            compression="gzip",
         )  # Column or Gene Indices for non-zero values from .mtx
         mtx_indptr = hdf_mtx.create_dataset(
             "indptr",
@@ -168,7 +189,9 @@ def add_mtx_to_anndata(mtx_file: Path, dest_file: Path, mtx_shape: dict, chunk_s
 
         # Process matrix data
         current_pos = 0
-        cell_counts = np.zeros(n_cells + 1, dtype=np.int64)  # Array to track number of non-zero values per cell
+        cell_counts = np.zeros(
+            n_cells + 1, dtype=np.int64
+        )  # Array to track number of non-zero values per cell
 
         mtx_iter = pandas.read_csv(
             mtx_file,
@@ -223,9 +246,14 @@ def convert_strings_to_categoricals(hdf5_file: Path, grps=["obs", "var"]) -> Non
                         del hdf[f"{grp}/{dataset[0]}"]
                         new_grp = hdf[grp].create_group(dataset[0])
                         new_grp.create_dataset(
-                            "categories", data=dat.categories, dtype=h5py.string_dtype(), compression="gzip"
+                            "categories",
+                            data=dat.categories,
+                            dtype=h5py.string_dtype(),
+                            compression="gzip",
                         )
-                        new_grp.create_dataset("codes", data=dat.codes, compression="gzip")
+                        new_grp.create_dataset(
+                            "codes", data=dat.codes, compression="gzip"
+                        )
                         new_grp.attrs["encoding-type"] = "categorical"
                         new_grp.attrs["encoding-version"] = "0.2.0"
                         new_grp.attrs["ordered"] = False
@@ -247,7 +275,9 @@ def create_anndata(mtx_dir, all_cells_path, sample_id):
 
         mtx_info = get_mtx_shape(mtx_file=mtx_path)
         add_features_to_anndata(feature_file=feature_path, dest_file=out_file)
-        add_all_cells_to_anndata(all_cells=all_cells_path, dest_file=out_file, mtx_shape=mtx_info)
+        add_all_cells_to_anndata(
+            all_cells=all_cells_path, dest_file=out_file, mtx_shape=mtx_info
+        )
         convert_strings_to_categoricals(hdf5_file=out_file)
         add_mtx_to_anndata(mtx_file=mtx_path, dest_file=out_file, mtx_shape=mtx_info)
 
@@ -256,13 +286,33 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--matrix_dir", type=Path, required=True, nargs="+", help="Path to directory with .mtx files.")
-    parser.add_argument("--all_cells", type=Path, required=True, nargs="+", help="Path to allCells.csv file.")
-    parser.add_argument("--sample_ids", type=str, required=True, nargs="+", help="Sample IDs for each sample.")
+    parser.add_argument(
+        "--matrix_dir",
+        type=Path,
+        required=True,
+        nargs="+",
+        help="Path to directory with .mtx files.",
+    )
+    parser.add_argument(
+        "--all_cells",
+        type=Path,
+        required=True,
+        nargs="+",
+        help="Path to allCells.csv file.",
+    )
+    parser.add_argument(
+        "--sample_ids",
+        type=str,
+        required=True,
+        nargs="+",
+        help="Sample IDs for each sample.",
+    )
 
     args = parser.parse_args()
 
-    for mtx_path, ac_path, samp_id in zip(args.matrix_dir, args.all_cells, args.sample_ids):
+    for mtx_path, ac_path, samp_id in zip(
+        args.matrix_dir, args.all_cells, args.sample_ids
+    ):
         create_anndata(mtx_dir=mtx_path, all_cells_path=ac_path, sample_id=samp_id)
 
     if len(args.sample_ids) > 1:
@@ -274,7 +324,9 @@ def main():
         # So I add the var data to the anndata object after concatenation.
         # anndata.experimental.concat_on_disk(
         #   in_files=anndata_list, out_file="scale_merged_anndata.h5ad", merge = "same")
-        anndata.experimental.concat_on_disk(in_files=anndata_list, out_file="merged_anndata.h5ad")
+        anndata.experimental.concat_on_disk(
+            in_files=anndata_list, out_file="merged_anndata.h5ad"
+        )
         # Use features.tsv file from first sample for var data.
         feat_file = Path(os.path.join(args.matrix_dir[0], "features.tsv.gz"))
         add_features_to_anndata(feature_file=feat_file, dest_file="merged_anndata.h5ad")

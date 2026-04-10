@@ -84,7 +84,10 @@ def filter_sparse_matrix(raw_mtx, filtered_indices, cell_stats):
         filtered_indices.select(["cell_id"])
         .with_row_index("filtered_index")
         .join(
-            cell_stats.select(["Cell_Barcode"]).with_row_index(), left_on="cell_id", right_on="Cell_Barcode", how="left"
+            cell_stats.select(["Cell_Barcode"]).with_row_index(),
+            left_on="cell_id",
+            right_on="Cell_Barcode",
+            how="left",
         )
     )
     idx = indices.filter(pl.col("index").is_not_null())["index"].to_numpy()
@@ -93,7 +96,13 @@ def filter_sparse_matrix(raw_mtx, filtered_indices, cell_stats):
     # Add sparse columns for barcodes that were not detected in the enriched library
     missing_idx = indices.filter(pl.col("index").is_null())["filtered_index"].to_numpy()
     for idx in missing_idx:
-        filtered_mtx = hstack([filtered_mtx[:, :idx], csr_array((filtered_mtx.shape[0], 1)), filtered_mtx[:, idx:]])
+        filtered_mtx = hstack(
+            [
+                filtered_mtx[:, :idx],
+                csr_array((filtered_mtx.shape[0], 1)),
+                filtered_mtx[:, idx:],
+            ]
+        )
 
     return filtered_mtx
 
@@ -126,8 +135,12 @@ def hash_to_well(hash_combos: Path, expected_combos=None):
         reader = csv.reader(f, delimiter="\t")
         hash_combos_dict = {row[0]: row[1] for row in reader}
     if expected_combos:
-        expected_fixation_wells = wells_for_range(expected_combos, list(hash_combos_dict.values()))
-        hash_combos_dict = {k: v for k, v in hash_combos_dict.items() if v in expected_fixation_wells}
+        expected_fixation_wells = wells_for_range(
+            expected_combos, list(hash_combos_dict.values())
+        )
+        hash_combos_dict = {
+            k: v for k, v in hash_combos_dict.items() if v in expected_fixation_wells
+        }
     return hash_combos_dict
 
 
@@ -161,9 +174,13 @@ def compute_background_series(mtx, min_cell_thresh, min_background_val, top_n=2)
         row_arr = mtx[[row_idx], :].toarray().ravel().astype(float)
         row_arr[(row_arr >= nth_val) | (row_arr == 0)] = np.nan
         # compute median of counts for this hash excluding cells where it was zero or a top n hash
-        min_cells = mtx.shape[1] * min_cell_thresh # calculate min n cells a bg count needs to occur in
-        bg_counts = sum(~np.isnan(row_arr)) # number of cells a bg count takes place in
-        background[row_idx] = min_background_val if bg_counts < min_cells else np.nanmedian(row_arr) # set bg to zero for oligo if too few bg counts, otherwise median
+        min_cells = (
+            mtx.shape[1] * min_cell_thresh
+        )  # calculate min n cells a bg count needs to occur in
+        bg_counts = sum(~np.isnan(row_arr))  # number of cells a bg count takes place in
+        background[row_idx] = (
+            min_background_val if bg_counts < min_cells else np.nanmedian(row_arr)
+        )  # set bg to zero for oligo if too few bg counts, otherwise median
     return background
 
 
@@ -171,19 +188,25 @@ def corrected_p_values_poisson(sparse_matrix, background, features_dict, thresho
     observed_counts = sparse_matrix.toarray()
     expected_counts = 3 * background
 
-    expected = np.tile(expected_counts, (sparse_matrix.shape[1], 1)).T  # Repeat expected counts for each sample
+    expected = np.tile(
+        expected_counts, (sparse_matrix.shape[1], 1)
+    ).T  # Repeat expected counts for each sample
     p_value = 1 - poisson.cdf(observed_counts - 1, expected)
     results = pd.DataFrame(p_value)
 
     results_T = results.T
-    results_corrected = results_T.apply(lambda col: false_discovery_control(col, method="bh"), axis=0)
+    results_corrected = results_T.apply(
+        lambda col: false_discovery_control(col, method="bh"), axis=0
+    )
     results_corrected.columns = features_dict.keys()
 
     # Did a hash pass the background test
 
     passing_hashes = results_corrected.apply(
         lambda row: (
-            ";".join([col for col in results_corrected.columns[row < threshold]]) if any(row < threshold) else "No_Pass"
+            ";".join([col for col in results_corrected.columns[row < threshold]])
+            if any(row < threshold)
+            else "No_Pass"
         ),
         axis=1,
     )
@@ -204,7 +227,11 @@ def assignment_criteria_bg(row, hash_well_dict, toptwo_frac):
         strings_column1 = row["topTwo_scaleplex"].split(";")
         strings_column2 = row["passing_scaleplex"].split(";")
         if all(string in strings_column2 for string in strings_column1):
-            assigned_hash = hash_well_dict[max_cols] if max_cols in hash_well_dict else codes.unexpected
+            assigned_hash = (
+                hash_well_dict[max_cols]
+                if max_cols in hash_well_dict
+                else codes.unexpected
+            )
         # Purity Threshold Passed, but Top hash was not the one that passed background
         else:
             assigned_hash = codes.max_fail
@@ -216,31 +243,55 @@ def assignment_criteria_bg(row, hash_well_dict, toptwo_frac):
 
 def assignment_criteria_fc(row, hash_well_dict, fc_threshold):
     assigned_hash = ""
-    if row["second"] != 0 and (row["third"] == 0 or (row["second"] / row["third"]) > fc_threshold):
+    if row["second"] != 0 and (
+        row["third"] == 0 or (row["second"] / row["third"]) > fc_threshold
+    ):
         max_cols = row["topTwo_scaleplex"]
-        assigned_hash = hash_well_dict[max_cols] if max_cols in hash_well_dict else codes.unexpected
+        assigned_hash = (
+            hash_well_dict[max_cols] if max_cols in hash_well_dict else codes.unexpected
+        )
     else:
         assigned_hash = codes.enrich_fail
     return assigned_hash
 
 
 def hash_assignment(
-    sparse_matrix, cell_stats, features_dict, assignment_method, toptwo_frac, hash_well_dict, fc_threshold, min_cell_percent, min_background_count
+    sparse_matrix,
+    cell_stats,
+    features_dict,
+    assignment_method,
+    toptwo_frac,
+    hash_well_dict,
+    fc_threshold,
+    min_cell_percent,
+    min_background_count,
 ):
     """Creates a list of guides (columns) that passed the minimum UMI threshold within each cell"""
     assignment_df = pd.DataFrame(index=cell_stats.index)
     if not assignment_df.index.empty:
         if assignment_method == "bg":
-            background = compute_background_series(sparse_matrix, min_cell_percent, min_background_count, top_n=2)
-            passing_hashes_df = corrected_p_values_poisson(sparse_matrix, background, features_dict, 0.05)
-            assignment_df["passing_scaleplex"] = passing_hashes_df["passing_scaleplex"].values
+            background = compute_background_series(
+                sparse_matrix, min_cell_percent, min_background_count, top_n=2
+            )
+            passing_hashes_df = corrected_p_values_poisson(
+                sparse_matrix, background, features_dict, 0.05
+            )
+            assignment_df["passing_scaleplex"] = passing_hashes_df[
+                "passing_scaleplex"
+            ].values
             assignment_df["assigned_scaleplex"] = cell_stats.join(assignment_df).apply(
-                assignment_criteria_bg, axis=1, hash_well_dict=hash_well_dict, toptwo_frac=toptwo_frac
+                assignment_criteria_bg,
+                axis=1,
+                hash_well_dict=hash_well_dict,
+                toptwo_frac=toptwo_frac,
             )
         # Iterate over rows
         if assignment_method == "fc":
             assignment_df["assigned_scaleplex"] = cell_stats.apply(
-                assignment_criteria_fc, axis=1, hash_well_dict=hash_well_dict, fc_threshold=fc_threshold
+                assignment_criteria_fc,
+                axis=1,
+                hash_well_dict=hash_well_dict,
+                fc_threshold=fc_threshold,
             )
     else:
         # Add a column for passing_scaleplex to enable merge with non-empty allCells.csv
@@ -284,7 +335,9 @@ def main(
 
     # write raw barcodes
     with gzip.open(raw_matrix_dir / "barcodes.tsv.gz", "wb") as f:
-        cell_stats_df.select(["Cell_Barcode"]).write_csv(f, separator="\t", include_header=False)
+        cell_stats_df.select(["Cell_Barcode"]).write_csv(
+            f, separator="\t", include_header=False
+        )
 
     guide_matrix_filtered = filter_sparse_matrix(guide_matrix, rna, cell_stats_df)
     with gzip.open(f"{matrix_dir}/matrix.mtx.gz", "wb") as f:
@@ -294,7 +347,11 @@ def main(
 
     # Create merged allCells with all rows from RNA and matching rows from ENRICH if present
     cell_stats_passing = rna.select(["cell_id"] + aliases).join(
-        cell_stats_df, how="left", left_on="cell_id", right_on="Cell_Barcode", suffix="_ENRICH"
+        cell_stats_df,
+        how="left",
+        left_on="cell_id",
+        right_on="Cell_Barcode",
+        suffix="_ENRICH",
     )
     cell_stats_passing = cell_stats_passing.drop(cs.ends_with("_ENRICH"))
 
@@ -313,7 +370,9 @@ def main(
         min_cell_count_bg,
         min_bg_scaleplex_count,
     )  # hash assignemt of any hash that are = max UMI value for that cell
-    cell_stats_passing = cell_stats_passing.join(assignment_df, how="left", on="cell_id")
+    cell_stats_passing = cell_stats_passing.join(
+        assignment_df, how="left", on="cell_id"
+    )
     cell_stats_passing = cell_stats_passing.rename({"cell_id": "Cell_Barcode"})
     assignment_cols = assignment_df.columns
     assignment_cols.remove("cell_id")
@@ -341,7 +400,9 @@ def main(
     cell_stats_df.write_parquet(out_dir / f"{id}.ScalePlex.allBarcodes.parquet")
 
     assigned_cells = (
-        rna.join(assignment_df, how="left", on="cell_id").to_pandas().set_index("cell_id")
+        rna.join(assignment_df, how="left", on="cell_id")
+        .to_pandas()
+        .set_index("cell_id")
     )  # add assignment for RNA passing cells
     # save allCells with scaleplex assignment
     assigned_cells.to_csv(out_dir / f"{id}_allCellsWithAssignment.csv")
@@ -357,7 +418,10 @@ if __name__ == "__main__":
             that share the same cell barcodes as the passing RNA analysis per sample"
     )
     parser.add_argument(
-        "--umi_matrix", metavar="MATRIX.mtx", type=Path, help="count_hash output of hash x cells raw UMI matrix"
+        "--umi_matrix",
+        metavar="MATRIX.mtx",
+        type=Path,
+        help="count_hash output of hash x cells raw UMI matrix",
     )
     parser.add_argument(
         "--all_cells",
@@ -372,7 +436,10 @@ if __name__ == "__main__":
         help="count_hash output of cell metadata for HASH cell guide UMI matrix",
     )
     parser.add_argument(
-        "--references", metavar="REFERENCES", type=Path, help="Path to folder containing barcode whitelists"
+        "--references",
+        metavar="REFERENCES",
+        type=Path,
+        help="Path to folder containing barcode whitelists",
     )
     parser.add_argument(
         "--lib_struct",
@@ -394,19 +461,22 @@ if __name__ == "__main__":
         help="Top two unique scaleplex UMIs must be over this fraction to be assigned",
     )
     parser.add_argument(
-        "--fc_threshold", metavar="FC_THRESHOLD", type=float, help="FC threshold for fold change based assignment"
+        "--fc_threshold",
+        metavar="FC_THRESHOLD",
+        type=float,
+        help="FC threshold for fold change based assignment",
     )
     parser.add_argument(
-        "--min_cell_count_bg", 
-        metavar="MIN_CELL_COUNT_BG", 
+        "--min_cell_count_bg",
+        metavar="MIN_CELL_COUNT_BG",
         type=float,
-        help="Fraction of cells that an oligo needs background counts in for consideration"
+        help="Fraction of cells that an oligo needs background counts in for consideration",
     )
     parser.add_argument(
-        "--min_bg_scaleplex_count", 
-        metavar="MIN_BG_SCALEPLEX_COUNT", 
+        "--min_bg_scaleplex_count",
+        metavar="MIN_BG_SCALEPLEX_COUNT",
         type=float,
-        help="Minimum value set in the background estimation for an oligo if it fails min_cell_count_bg check"
+        help="Minimum value set in the background estimation for an oligo if it fails min_cell_count_bg check",
     )
     parser.add_argument(
         "--expected_combos",

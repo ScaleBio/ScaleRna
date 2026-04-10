@@ -30,9 +30,14 @@ def load_pool_whitelist(lib_json: dict[str, dict]):
     for lib in lib_json:
         pcr_pool_whitelist = None
         for bc in lib_json[lib]["barcodes"]:
-            if bc.get("name", "").upper() == "PCR" or bc.get("alias", "").upper() == "PCR":
+            if (
+                bc.get("name", "").upper() == "PCR"
+                or bc.get("alias", "").upper() == "PCR"
+            ):
                 pcr_pool_whitelist = lib.parent / bc["sequences"]
-                substr = slice(bc.get("start", 0), bc.get("start", 0) + bc.get("length", 0))
+                substr = slice(
+                    bc.get("start", 0), bc.get("start", 0) + bc.get("length", 0)
+                )
 
         if pcr_pool_whitelist is None:
             raise ValueError("PCR whitelist not found in library structure")
@@ -54,9 +59,15 @@ def get_barcode_entry_idx_in_lib_json(lib_json: dict[str, dict]):
     for lib in lib_json:
         sample_barcode = lib_json[lib]["sample_barcode"]
         for idx, bc in enumerate(lib_json[lib]["barcodes"]):
-            if bc.get("name", "").upper() == "PCR" or bc.get("alias", "").upper() == "PCR":
+            if (
+                bc.get("name", "").upper() == "PCR"
+                or bc.get("alias", "").upper() == "PCR"
+            ):
                 pcr_idx.append(idx)
-            if bc.get("name", "").upper() == sample_barcode or bc.get("alias", "").upper() == sample_barcode:
+            if (
+                bc.get("name", "").upper() == sample_barcode
+                or bc.get("alias", "").upper() == sample_barcode
+            ):
                 rt_idx.append(idx)
 
     if all(x == pcr_idx[0] for x in pcr_idx) and all(x == rt_idx[0] for x in rt_idx):
@@ -108,16 +119,26 @@ def match_seq_to_get_orientation(observed_seq: str, whitelist: dict) -> bool:
     for _alias, seqs in whitelist.items():
         for candidate in seqs[0]:
             dist_fwd.append(get_hamming_distance(observed_seq[seqs[1]], candidate))
-            dist_rev.append(get_hamming_distance(observed_seq[seqs[1]], candidate[::-1].translate(COMPLEMENT)))
+            dist_rev.append(
+                get_hamming_distance(
+                    observed_seq[seqs[1]], candidate[::-1].translate(COMPLEMENT)
+                )
+            )
 
     # 0 indicates exact match, 1 indicates mismatch
     if dist_fwd.count(0) > 1 or dist_rev.count(0) > 1:
         raise ValueError(f"{observed_seq} has multiple exact matches in whitelist")
     if dist_fwd.count(0) == 1 and dist_rev.count(0) == 1:
-        print(f"{observed_seq} has exact matches in both orientations in whitelist", file=sys.stderr)
+        print(
+            f"{observed_seq} has exact matches in both orientations in whitelist",
+            file=sys.stderr,
+        )
         return None
     if dist_fwd.count(1) >= 1 and dist_rev.count(1) >= 1:
-        print(f"{observed_seq} has multiple mismatched matches in both orientations in whitelist", file=sys.stderr)
+        print(
+            f"{observed_seq} has multiple mismatched matches in both orientations in whitelist",
+            file=sys.stderr,
+        )
         return None
 
     if any([i <= 1 for i in dist_fwd]):
@@ -198,7 +219,9 @@ def sniff_fastq(fastq_dir: Path, whitelist: dict, allow_ambiguous: bool):
     raise_ambiguous_error(fq_to_pool_mapping, allow_ambiguous)
 
 
-def write_to_csv(mapping: list, filename: str, header: list = ["file", "pool", "is_rc"]):
+def write_to_csv(
+    mapping: list, filename: str, header: list = ["file", "pool", "is_rc"]
+):
     """Write the mapping information to a CSV file
 
     Args:
@@ -243,13 +266,23 @@ def raise_ambiguous_error(mapping: list, allow_ambiguous: bool, ultima: bool = F
     """
     if not allow_ambiguous:
         ambiguous = [
-            str(x[0]) for x in mapping if x[1] == "Ambiguous" or (ultima and x[2] == "Ambiguous")
+            str(x[0])
+            for x in mapping
+            if x[1] == "Ambiguous" or (ultima and x[2] == "Ambiguous")
         ]  # check whether rt is ambiguous
         if ambiguous:
-            raise ValueError(f"Ambiguous pools detected in the following files: {ambiguous}")
+            raise ValueError(
+                f"Ambiguous pools detected in the following files: {ambiguous}"
+            )
 
 
-def sniff_cram(ultima_cram_dir: Path, pcr_idx: int, rt_idx: int, allow_ambiguous: bool, whitelist: dict):
+def sniff_cram(
+    ultima_cram_dir: Path,
+    pcr_idx: int,
+    rt_idx: int,
+    allow_ambiguous: bool,
+    whitelist: dict,
+):
     """
     Read 1000 entries and detect pcr barcode alias and rt barcode alias from cram files
 
@@ -293,7 +326,12 @@ def match_cram_pcr_alias(cb_alias: str, whitelist: dict) -> str:
 
 
 def get_cram_match_info_for_cb(
-    cram: Path, idx: int, whitelist: dict, barcode_alias: str, tag: str = "CB", separator: str = "+"
+    cram: Path,
+    idx: int,
+    whitelist: dict,
+    barcode_alias: str,
+    tag: str = "CB",
+    separator: str = "+",
 ):
     """Normalize counts for barcode matches in a cram file"""
     aliases = []
@@ -304,26 +342,44 @@ def get_cram_match_info_for_cb(
             try:
                 cb = read.get_tag(tag).split(separator)
                 if barcode_alias == "PCR":
-                    aliases.append(match_cram_pcr_alias(cb[idx], whitelist))  # need to match to whitelist
+                    aliases.append(
+                        match_cram_pcr_alias(cb[idx], whitelist)
+                    )  # need to match to whitelist
                 else:
-                    aliases.append(cb[idx])  # for rt, no matching, so just append the alias
+                    aliases.append(
+                        cb[idx]
+                    )  # for rt, no matching, so just append the alias
             except KeyError:
                 aliases.append(None)  # CB tag not found
     return pd.Series(aliases).value_counts(normalize=True)
 
 
 def main():
-    parser = argparse.ArgumentParser("Read first 1000 reads of fastq files and detect library pool")
-    parser.add_argument("--fastqDir", type=Path, help="Directory containing fastq files")
-    parser.add_argument("--ultimaCramDir", type=Path, help="Directory containing Ultima unaligned CRAM files")
+    parser = argparse.ArgumentParser(
+        "Read first 1000 reads of fastq files and detect library pool"
+    )
+    parser.add_argument(
+        "--fastqDir", type=Path, help="Directory containing fastq files"
+    )
+    parser.add_argument(
+        "--ultimaCramDir",
+        type=Path,
+        help="Directory containing Ultima unaligned CRAM files",
+    )
     parser.add_argument("--libraryStruct", required=True, type=Path)
     parser.add_argument("--scalePlexLibraryStruct", required=False, type=Path)
-    parser.add_argument("--allowAmbiguous", action="store_true", help="Don't error if fastq has multiple pools")
+    parser.add_argument(
+        "--allowAmbiguous",
+        action="store_true",
+        help="Don't error if fastq has multiple pools",
+    )
     args = parser.parse_args()
 
     lib_json = {args.libraryStruct: json.load(open(args.libraryStruct))}
     if args.scalePlexLibraryStruct is not None:
-        lib_json[args.scalePlexLibraryStruct] = json.load(open(args.scalePlexLibraryStruct))
+        lib_json[args.scalePlexLibraryStruct] = json.load(
+            open(args.scalePlexLibraryStruct)
+        )
     whitelist = load_pool_whitelist(lib_json)
     if args.fastqDir:
         sniff_fastq(

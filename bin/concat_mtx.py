@@ -10,7 +10,9 @@ from pathlib import Path
 import shutil
 
 
-def concat_mtx(dirs: list[Path], output_dir: Path, con: duckdb.DuckDBPyConnection) -> None:
+def concat_mtx(
+    dirs: list[Path], output_dir: Path, con: duckdb.DuckDBPyConnection
+) -> None:
     """
     Concatenate sparse matrices in Matrix Market format
 
@@ -53,7 +55,9 @@ def concat_mtx(dirs: list[Path], output_dir: Path, con: duckdb.DuckDBPyConnectio
         """
         )
     if len(set(row_size)) != 1:
-        raise AssertionError("Row dimensions must match to concatenate Matrix Market files by column")
+        raise AssertionError(
+            "Row dimensions must match to concatenate Matrix Market files by column"
+        )
     con.sql(
         f"""
     COPY mtx
@@ -72,16 +76,35 @@ def concat_mtx(dirs: list[Path], output_dir: Path, con: duckdb.DuckDBPyConnectio
         for mtx_dir in dirs:
             with gzip.open(mtx_dir / "barcodes.tsv.gz", "rt") as f:
                 barcodes_file.write(f.read())
-    with gzip.open(dirs[0] / "features.tsv.gz", "rb") as f_in, gzip.open(output_dir / "features.tsv.gz", "wb") as f_out:
+    with (
+        gzip.open(dirs[0] / "features.tsv.gz", "rb") as f_in,
+        gzip.open(output_dir / "features.tsv.gz", "wb") as f_out,
+    ):
         shutil.copyfileobj(f_in, f_out)
 
 
 def main():
-    parser = argparse.ArgumentParser("Combine Matrix Market files into single output file, stack columns")
-    parser.add_argument("inputDirs", nargs="+", type=Path, help="Filtered matrix directories to merge")
+    parser = argparse.ArgumentParser(
+        "Combine Matrix Market files into single output file, stack columns"
+    )
+    parser.add_argument(
+        "inputDirs", nargs="+", type=Path, help="Filtered matrix directories to merge"
+    )
     parser.add_argument("--id", type=str, help="Sample ID")
-    parser.add_argument("--threads", type=int, required=False, default=2, help="Number of threads for duckdb")
-    parser.add_argument("--memory", type=str, required=False, default="7 GB", help="Memory allocated to task")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        required=False,
+        default=2,
+        help="Number of threads for duckdb",
+    )
+    parser.add_argument(
+        "--memory",
+        type=str,
+        required=False,
+        default="7 GB",
+        help="Memory allocated to task",
+    )
     args = parser.parse_args()
 
     output_dir = Path(".") / f"{args.id}_filtered_star_output"

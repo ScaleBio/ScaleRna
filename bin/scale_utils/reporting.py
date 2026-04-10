@@ -54,7 +54,9 @@ def formatNumericVal(val: int | float) -> str | float:
         return val
 
 
-def styleTable(styler, title: str, hideColumnHeaders=False, boldColumn=None, numericCols=None):
+def styleTable(
+    styler, title: str, hideColumnHeaders=False, boldColumn=None, numericCols=None
+):
     """
     Function to modify given @pd.DataFrame.Styler
 
@@ -76,7 +78,10 @@ def styleTable(styler, title: str, hideColumnHeaders=False, boldColumn=None, num
     if hideColumnHeaders:
         styler.hide(axis="columns")
     else:
-        styler.set_table_styles([{"selector": "th", "props": [("border", "black solid !important")]}], overwrite=False)
+        styler.set_table_styles(
+            [{"selector": "th", "props": [("border", "black solid !important")]}],
+            overwrite=False,
+        )
 
     if boldColumn is not None:
         styler.set_properties(subset=boldColumn, **{"font-weight": "bold"})
@@ -84,11 +89,21 @@ def styleTable(styler, title: str, hideColumnHeaders=False, boldColumn=None, num
     if title != "":
         styler.set_caption(title)
         styler.set_table_styles(
-            [{"selector": "caption", "props": [("border", "black solid !important"), ("font-weight", "bold")]}],
+            [
+                {
+                    "selector": "caption",
+                    "props": [
+                        ("border", "black solid !important"),
+                        ("font-weight", "bold"),
+                    ],
+                }
+            ],
             overwrite=False,
         )
 
-    styler.set_properties(**{"border-color": "black", "border-style": "solid !important"})
+    styler.set_properties(
+        **{"border-color": "black", "border-style": "solid !important"}
+    )
     return styler
 
 
@@ -124,7 +139,9 @@ def split_string_into_lines(s: str, length: int = 30) -> list[str]:
     return [s[i : i + length] for i in range(0, len(s), length)]
 
 
-def create_metric_table(df: pd.DataFrame, title: str, obj_list: list = [], rm_nan: bool = False) -> dp.Table:
+def create_metric_table(
+    df: pd.DataFrame, title: str, obj_list: list = [], rm_nan: bool = False
+) -> dp.Table:
     """
     Create a datapane tabel from a dataframe with a set of metrics (name / value)
 
@@ -143,7 +160,9 @@ def create_metric_table(df: pd.DataFrame, title: str, obj_list: list = [], rm_na
         df = df[~df["Value"].str.contains("nan|NA", na=False)]
     metrics = df[["Metric", "Value"]]
     style = metrics.style.apply(
-        lambda row: highlight_below_threshold_values(row, obj_list), axis=1, result_type="broadcast"
+        lambda row: highlight_below_threshold_values(row, obj_list),
+        axis=1,
+        result_type="broadcast",
     ).pipe(styleTable, title=title, hideColumnHeaders=True, boldColumn="Metric")
     return make_table(style)
 
@@ -227,15 +246,23 @@ def buildPlatePlot(counts, title, threshold, what="Cells", subtitle=""):
     """
     max_val = counts.to_numpy().max()
     # Create a custom colormap
-    colors = [(0, 0, 0), (128 / 255, 170 / 255, 255 / 255)]  # RGB values for black and shade of blue
+    colors = [
+        (0, 0, 0),
+        (128 / 255, 170 / 255, 255 / 255),
+    ]  # RGB values for black and shade of blue
     positions = [0, 1]  # Corresponding positions for 0 and 1 in the colormap
-    cmap = LinearSegmentedColormap.from_list("CustomColormap", list(zip(positions, colors)))
+    cmap = LinearSegmentedColormap.from_list(
+        "CustomColormap", list(zip(positions, colors))
+    )
     # Log-transform the colormap
     norm = SymLogNorm(linthresh=threshold, vmin=0, vmax=max(10, max_val), clip=True)
     # Create plotly compatible colorscale
     # https://plotly.github.io/plotly.py-docs/generated/plotly.graph_objects.Heatmap.html
     positions = np.linspace(0, max_val, 256)
-    colors = ["rgb" + str((int(r * 255), int(g * 255), int(b * 255))) for r, g, b, _ in cmap(norm(positions))]
+    colors = [
+        "rgb" + str((int(r * 255), int(g * 255), int(b * 255)))
+        for r, g, b, _ in cmap(norm(positions))
+    ]
     colorscale = list(zip(np.linspace(0, 1, 256), colors))
 
     # create custom tickvals
@@ -267,7 +294,14 @@ def buildPlatePlot(counts, title, threshold, what="Cells", subtitle=""):
     # Update layout to change axis font size
     subtitle_html = f"<br><sub>{subtitle}</sub>" if subtitle else ""
     fig.update_layout(
-        title=dict(text=f"{title}{subtitle_html}", y=0.9, x=0.5, xanchor="center", yanchor="top", font=dict(size=20)),
+        title=dict(
+            text=f"{title}{subtitle_html}",
+            y=0.9,
+            x=0.5,
+            xanchor="center",
+            yanchor="top",
+            font=dict(size=20),
+        ),
         xaxis=dict(tickfont=dict(size=13), side="top"),
         yaxis=dict(tickfont=dict(size=13)),
     )
@@ -281,10 +315,16 @@ def buildDfForSamplePlatePlot(lib_json_obj: LibJsonParser, index: str):
         if "alias" in entry:
             if entry["alias"] == index.split("_")[0]:
                 lib_json_entry_dict = entry
-    assert lib_json_entry_dict is not None, f"Could not find barcode {index.split('_')[0]} in libJson"
-    max_letter, max_number = lib_json_obj.getMaxWellNumberAndLetter(lib_json_obj.parent_dir / f'{lib_json_entry_dict["sequences"]}')
+    assert (
+        lib_json_entry_dict is not None
+    ), f"Could not find barcode {index.split('_')[0]} in libJson"
+    max_letter, max_number = lib_json_obj.getMaxWellNumberAndLetter(
+        lib_json_obj.parent_dir / f'{lib_json_entry_dict["sequences"]}'
+    )
     wellPlateCellCountDf = pd.DataFrame(
-        0, columns=range(1, max_number + 1), index=getCharacterIndices(65, ord(max_letter) + 1)
+        0,
+        columns=range(1, max_number + 1),
+        index=getCharacterIndices(65, ord(max_letter) + 1),
     )
     wellPlateNumCellDf = wellPlateCellCountDf.copy()
     for i in range(65, ord(max_letter) + 1):
@@ -319,7 +359,9 @@ def barcodeLevelPlots(
     Returns:
         dp.Group object containing all the plots
     """
-    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(lib_json_obj, index)
+    wellPlateCellCountDf, wellPlateNumCellDf, well_dict = buildDfForSamplePlatePlot(
+        lib_json_obj, index
+    )
 
     num_cells_dict = cells[index].value_counts().to_dict()
 
@@ -345,20 +387,38 @@ def barcodeLevelPlots(
         if len(well_dict[key]) == 0:
             wellPlateCellCountDf.at[letter, int(numbers)] = 0
         else:
-            wellPlateCellCountDf.at[letter, int(numbers)] = int(statistics.median(well_dict[key]))
+            wellPlateCellCountDf.at[letter, int(numbers)] = int(
+                statistics.median(well_dict[key])
+            )
 
     readsPerIndexBox = buildPlatePlot(
-        wellPlateCellCountDf, "Unique Transcript Counts Per Cell", 100.0, what="Transcripts"
+        wellPlateCellCountDf,
+        "Unique Transcript Counts Per Cell",
+        100.0,
+        what="Transcripts",
     )
     cellsPerIndexBar = buildPlatePlot(wellPlateNumCellDf, "Number of cells", 1.0)
     namePrefix = title.replace(" ", "_")
     if internalReport:
         cellsPerIndexBar.write_image(
-            writeDir / "figures_internal" / f"{sampleId}_CellCount_By_{namePrefix}_Heatmap.png"
+            writeDir
+            / "figures_internal"
+            / f"{sampleId}_CellCount_By_{namePrefix}_Heatmap.png"
         )
         readsPerIndexBox.write_image(
-            writeDir / "figures_internal" / f"{sampleId}_UniqueTranscriptCount_By_{namePrefix}_Heatmap.png"
+            writeDir
+            / "figures_internal"
+            / f"{sampleId}_UniqueTranscriptCount_By_{namePrefix}_Heatmap.png"
         )
-    wellPlateCellCountDf.to_csv(writeDir / "csv" / f"{sampleId}_unique_transcript_counts_by_{namePrefix}_well.csv")
-    wellPlateNumCellDf.to_csv(writeDir / "csv" / f"{sampleId}_num_cells_by_{namePrefix}_well.csv")
-    return dp.Group(dp.Text(f"## {title}"), dp.Group(dp.Plot(cellsPerIndexBar), dp.Plot(readsPerIndexBox), columns=2))
+    wellPlateCellCountDf.to_csv(
+        writeDir
+        / "csv"
+        / f"{sampleId}_unique_transcript_counts_by_{namePrefix}_well.csv"
+    )
+    wellPlateNumCellDf.to_csv(
+        writeDir / "csv" / f"{sampleId}_num_cells_by_{namePrefix}_well.csv"
+    )
+    return dp.Group(
+        dp.Text(f"## {title}"),
+        dp.Group(dp.Plot(cellsPerIndexBar), dp.Plot(readsPerIndexBox), columns=2),
+    )

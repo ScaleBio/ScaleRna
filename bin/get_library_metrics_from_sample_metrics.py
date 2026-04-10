@@ -47,10 +47,16 @@ def get_library_beads(sample_metrics, libName):
 def main():
     parser = argparse.ArgumentParser(description="Generate metrics for library report")
     parser.add_argument(
-        "--sample_metrics", nargs="+", type=str, required=True, help="Per sample metrics that need to be concatenated"
+        "--sample_metrics",
+        nargs="+",
+        type=str,
+        required=True,
+        help="Per sample metrics that need to be concatenated",
     )
     parser.add_argument(
-        "--libName", type=str, help="libName specified in passed samplesheet for which to generate a fastq report"
+        "--libName",
+        type=str,
+        help="libName specified in passed samplesheet for which to generate a fastq report",
     )
     parser.add_argument("--beadMetrics", action="store_true", default=False)
 

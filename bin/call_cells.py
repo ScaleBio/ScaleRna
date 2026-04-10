@@ -91,15 +91,22 @@ def classify_barcodes(
         A boolean array indicating if ambiguous barcode, if CellFinder is enabled
         A boolean array indicating if barcode above threshold or in top --expectedCells barcodes
     """
-    cell_barcodes = np.zeros(len(total_counts), dtype=bool)  # Initialize all barcodes as non-cells
-    ambiguous_barcodes = np.zeros(len(total_counts), dtype=bool)  # Only used if CellFinder is enabled
+    cell_barcodes = np.zeros(
+        len(total_counts), dtype=bool
+    )  # Initialize all barcodes as non-cells
+    ambiguous_barcodes = np.zeros(
+        len(total_counts), dtype=bool
+    )  # Only used if CellFinder is enabled
     ambient_barcodes = total_counts < options.minUTC
-    threshold = options.UTC or calculate_UTC_threshold(total_counts, ambient_barcodes, options=options)
+    threshold = options.UTC or calculate_UTC_threshold(
+        total_counts, ambient_barcodes, options=options
+    )
     if options.cellFinder:
         cell_barcodes = total_counts >= threshold
         ambiguous_barcodes = ~ambient_barcodes & ~cell_barcodes
         ambiguous_barcodes = ambiguous_barcodes & (
-            total_counts >= np.median(total_counts[cell_barcodes]) * options.medianFraction
+            total_counts
+            >= np.median(total_counts[cell_barcodes]) * options.medianFraction
         )
     elif options.fixedCells:
         if options.expectedCells < 0:
@@ -114,7 +121,9 @@ def classify_barcodes(
     return ambient_barcodes, ambiguous_barcodes, cell_barcodes
 
 
-def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcodes: np.ndarray, options: CellCallingOptions) -> int:
+def calculate_UTC_threshold(
+    total_counts: np.ndarray, ambient_barcodes: np.ndarray, options: CellCallingOptions
+) -> int:
     """
     Calculate the unique transcripts counts threshold above which all barcodes are called as cells
 
@@ -133,7 +142,9 @@ def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcodes: np.ndarr
         raise ValueError("--minCellRatio must be >= 1.")
     if options.expectedCells > 0 and options.expectedCells < len(total_counts):
         # when --expectedCells is set, use the top --expectedCells barcodes as preliminary cells
-        prelim_utcs = total_counts[np.argsort(total_counts)[::-1]][: options.expectedCells]
+        prelim_utcs = total_counts[np.argsort(total_counts)[::-1]][
+            : options.expectedCells
+        ]
     else:
         prelim_utcs = total_counts[~ambient_barcodes]
 
@@ -142,7 +153,9 @@ def calculate_UTC_threshold(total_counts: np.ndarray, ambient_barcodes: np.ndarr
     if len(prelim_utcs) != 0:
         # Calculate the UTC threshold as the UMI count
         # associated with the --topCellPercent of the preliminary cells divided by --minCellRatio.
-        threshold = np.round(np.percentile(prelim_utcs, options.topCellPercent) / options.minCellRatio)
+        threshold = np.round(
+            np.percentile(prelim_utcs, options.topCellPercent) / options.minCellRatio
+        )
 
     # Don't return threshold below minUTC
     return max(threshold, options.minUTC)
@@ -174,7 +187,9 @@ def call_cell_barcodes(
     Updates the pass and flags columns in bcs_df
     """
     total_counts = bcs_df.loc[subset, counts_col].to_numpy()
-    ambient_bcs, ambiguous_bcs, cell_bcs = classify_barcodes(total_counts, options=options)
+    ambient_bcs, ambiguous_bcs, cell_bcs = classify_barcodes(
+        total_counts, options=options
+    )
     flags = pd.Series("", index=bcs_df.index[subset])
     passed = pd.Series(cell_bcs, index=bcs_df.index[subset], copy=True)
     cellfinder_metrics = [
@@ -208,7 +223,9 @@ def call_cell_barcodes(
             len(cell_bcs),
         )
         passed.loc[ambiguous_bcs] = FDRs <= options.FDR
-        flags.loc[ambiguous_bcs] = flags.iloc[ambiguous_bcs].where(FDRs > options.FDR, other="cellFinder")
+        flags.loc[ambiguous_bcs] = flags.iloc[ambiguous_bcs].where(
+            FDRs > options.FDR, other="cellFinder"
+        )
         cellfinder_metrics.extend(
             [
                 ("CellCalling", "min_ambiguous", total_counts[ambiguous_bcs].min()),
@@ -220,7 +237,9 @@ def call_cell_barcodes(
 
     bcs_df.loc[subset, "pass"] = passed
     bcs_df.loc[subset, "flags"] = flags
-    return pd.DataFrame.from_records(cellfinder_metrics, columns=["Category", "Metric", "Value"])
+    return pd.DataFrame.from_records(
+        cellfinder_metrics, columns=["Category", "Metric", "Value"]
+    )
 
 
 def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
@@ -235,25 +254,38 @@ def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
     Returns:
         Metrics about MAD cell filtering
     """
-    cells = bcs_df[bcs_df["pass"]]  # Only run outlier filtering on cells (not background)
+    cells = bcs_df[
+        bcs_df["pass"]
+    ]  # Only run outlier filtering on cells (not background)
     flags = pd.Series("", index=cells.index)
     stats = []
     if options.reads_mads:  # Flag cells with low or high total read counts
         lreads = np.log(cells["totalReads"])
-        min_lreads = np.median(lreads) - options.reads_mads * median_abs_deviation(lreads)
-        max_lreads = np.median(lreads) + options.reads_mads * median_abs_deviation(lreads)
+        min_lreads = np.median(lreads) - options.reads_mads * median_abs_deviation(
+            lreads
+        )
+        max_lreads = np.median(lreads) + options.reads_mads * median_abs_deviation(
+            lreads
+        )
         flags[lreads < min_lreads] += ";low_reads"
         flags[lreads > max_lreads] += ";high_reads"
         stats.append(("MAD", "minimum_total_reads", np.round(np.exp(min_lreads))))
         stats.append(("MAD", "maximum_total_reads", np.round(np.exp(max_lreads))))
-    if options.passing_mads:  # Flag cells with low fraction passing reads (counted to a gene)
+    if (
+        options.passing_mads
+    ):  # Flag cells with low fraction passing reads (counted to a gene)
         preads = cells["countedReads"] / cells["totalReads"]
-        min_preads = max(0, np.median(preads) - options.passing_mads * median_abs_deviation(preads))
+        min_preads = max(
+            0, np.median(preads) - options.passing_mads * median_abs_deviation(preads)
+        )
         flags[preads < min_preads] += ";low_passing_reads"
         stats.append(("MAD", "minimum_passing_reads", min_preads))
     if options.mito_mads:  # Flag cells with high fraction mito reads
         mito = cells["mitoProp"]
-        max_mito = max(options.mito_min_thres, np.median(mito) + options.mito_mads * median_abs_deviation(mito))
+        max_mito = max(
+            options.mito_min_thres,
+            np.median(mito) + options.mito_mads * median_abs_deviation(mito),
+        )
         flags[mito > max_mito] += ";high_mito"
         stats.append(("MAD", "maximum_mito", max_mito))
     if options.filter_outliers:
@@ -277,16 +309,22 @@ def parse_star_log(reads: dict[str, float], star_log: Path) -> dict[str, float]:
     with open(star_log, "r") as f:
         for line in f:
             if "Average input read length" in line:
-                reads["avg_trimmed_read_len"] = float(line.split("Average input read length |")[1].strip())
+                reads["avg_trimmed_read_len"] = float(
+                    line.split("Average input read length |")[1].strip()
+                )
             if "Average mapped length" in line:
-                reads["avg_mapped_len"] = float(line.split("Average mapped length |")[1].strip())
+                reads["avg_mapped_len"] = float(
+                    line.split("Average mapped length |")[1].strip()
+                )
             if "Mismatch rate per base, % |" in line:
                 reads["mismatch_rate_per_base_perc"] = float(
                     line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]
                 )
             if "% of reads mapped to too many loci |" in line:
                 reads["mapped_to_too_many_loci_perc"] = float(
-                    line.split("% of reads mapped to too many loci |")[1].strip().split("%")[0]
+                    line.split("% of reads mapped to too many loci |")[1]
+                    .strip()
+                    .split("%")[0]
                 )
     return reads
 
@@ -306,12 +344,23 @@ def validate_bcs_df_order(bcs_df: pd.DataFrame, star_barcodes_path: Path) -> Non
         AssertionError: If the order of bcs_df does not match barcodes.tsv
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        bcs_df.index.to_frame().to_csv(Path(tmpdir) / "raw_barcodes.tsv", header=False, index=False)
+        bcs_df.index.to_frame().to_csv(
+            Path(tmpdir) / "raw_barcodes.tsv", header=False, index=False
+        )
         # create decompressed barcodes.tsv from star output
-        with gzip.open(star_barcodes_path, "rb") as f_in, open(Path(tmpdir) / "star_barcodes.tsv", "wb") as f_out:
+        with (
+            gzip.open(star_barcodes_path, "rb") as f_in,
+            open(Path(tmpdir) / "star_barcodes.tsv", "wb") as f_out,
+        ):
             shutil.copyfileobj(f_in, f_out)
-        if not cmp(Path(tmpdir) / "star_barcodes.tsv", Path(tmpdir) / "raw_barcodes.tsv", shallow=False):
-            raise AssertionError("Order of bcs_df DataFrame does not match barcodes.tsv")
+        if not cmp(
+            Path(tmpdir) / "star_barcodes.tsv",
+            Path(tmpdir) / "raw_barcodes.tsv",
+            shallow=False,
+        ):
+            raise AssertionError(
+                "Order of bcs_df DataFrame does not match barcodes.tsv"
+            )
 
 
 def generate_filtered_matrix(
@@ -341,8 +390,12 @@ def generate_filtered_matrix(
     filtered_path = f"{sample}_filtered_star_output"
     Path(".", filtered_path).mkdir(exist_ok=True)
     # Features.tsv is the same; we move it to that /filtered directory
-    shutil.copyfile(sample_specific_file_paths["features"], f"{filtered_path}/features.tsv.gz")
-    bcs_df.index[bcs_df["pass"]].to_frame().to_csv(f"{filtered_path}/barcodes.tsv.gz", header=False, index=False)
+    shutil.copyfile(
+        sample_specific_file_paths["features"], f"{filtered_path}/features.tsv.gz"
+    )
+    bcs_df.index[bcs_df["pass"]].to_frame().to_csv(
+        f"{filtered_path}/barcodes.tsv.gz", header=False, index=False
+    )
     # drop cell_id and generate numerical index
     bcs_df = bcs_df.reset_index(drop=True)
     # filter to passing cells
@@ -411,11 +464,18 @@ def label_barnyard(bcs_df: pd.DataFrame) -> None:
         min_mouse = bcs_df[bcs_df["pass"]].counts.min()
 
     # Label Mixed Cells
-    bcs_df.loc[(bcs_df.human_counts >= min_human) & (bcs_df.mouse_counts >= min_mouse), "species"] = "Mixed"
+    bcs_df.loc[
+        (bcs_df.human_counts >= min_human) & (bcs_df.mouse_counts >= min_mouse),
+        "species",
+    ] = "Mixed"
 
     # Calculate Background
-    human_bg_med, human_bg_std = get_background(bcs_df[(bcs_df.species == "Mouse")].minor_frac)
-    mouse_bg_med, mouse_bg_std = get_background(bcs_df[(bcs_df.species == "Human")].minor_frac)
+    human_bg_med, human_bg_std = get_background(
+        bcs_df[(bcs_df.species == "Mouse")].minor_frac
+    )
+    mouse_bg_med, mouse_bg_std = get_background(
+        bcs_df[(bcs_df.species == "Human")].minor_frac
+    )
 
     # Labeling mixed cells with low minor species fraction as ambiguous
     bcs_df.loc[
@@ -433,10 +493,14 @@ def label_barnyard(bcs_df: pd.DataFrame) -> None:
 
     # Labelling Human or Mouse as Ambiguous
     bcs_df.loc[
-        (bcs_df.species == "Human") & (bcs_df.minor_frac >= max(0.1, mouse_bg_med + 3 * mouse_bg_std)), "species"
+        (bcs_df.species == "Human")
+        & (bcs_df.minor_frac >= max(0.1, mouse_bg_med + 3 * mouse_bg_std)),
+        "species",
     ] = "Ambiguous"
     bcs_df.loc[
-        (bcs_df.species == "Mouse") & (bcs_df.minor_frac >= max(0.1, human_bg_med + 3 * human_bg_std)), "species"
+        (bcs_df.species == "Mouse")
+        & (bcs_df.minor_frac >= max(0.1, human_bg_med + 3 * human_bg_std)),
+        "species",
     ] = "Ambiguous"
 
 
@@ -457,7 +521,9 @@ def get_background(minor_fracs: pd.Series) -> tuple[float, float]:
     return median, std
 
 
-def filter_beads(con, fail_ambient: bool, bead_scores: Path, min_kl_score: float) -> None:
+def filter_beads(
+    con, fail_ambient: bool, bead_scores: Path, min_kl_score: float
+) -> None:
     filter_query = ", pass = false" if fail_ambient else ""
     con.sql(
         f"""
@@ -555,14 +621,26 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Required argument for specifying the path to the sampleMetrics parquet file
-    parser.add_argument("--sampleMetrics", type=Path, required=True, help="Path to the sampleMetrics parquet file.")
+    parser.add_argument(
+        "--sampleMetrics",
+        type=Path,
+        required=True,
+        help="Path to the sampleMetrics parquet file.",
+    )
 
     # Required and optional arguments for specifying the STARsolo outputs for this sample
     parser.add_argument(
-        "--STARsolo_out", type=Path, required=True, help="Path to the STARsolo outputs for this sample."
+        "--STARsolo_out",
+        type=Path,
+        required=True,
+        help="Path to the STARsolo outputs for this sample.",
     )
     parser.add_argument(
-        "--feature_type", type=str, required=False, default="GeneFull_Ex50pAS", help="STARsolo feature type used."
+        "--feature_type",
+        type=str,
+        required=False,
+        default="GeneFull_Ex50pAS",
+        help="STARsolo feature type used.",
     )
     parser.add_argument(
         "--matrix_type",
@@ -574,7 +652,11 @@ def main():
 
     # Optional argument to specify the name of the sample for which cells are being called
     parser.add_argument(
-        "--sample", type=str, required=False, default="example", help="Unique string to identify this sample."
+        "--sample",
+        type=str,
+        required=False,
+        default="example",
+        help="Unique string to identify this sample.",
     )
 
     # Optional argument to set hard thresholds for cell calling
@@ -656,11 +738,24 @@ def main():
         help="Number of median absolute deviations in gene count/UMI count/mitochondrial \
             read percentage above/below which a cell will be flagged as an outlier.",
     )
-    parser.add_argument("--madsReads", type=float, default=np.nan, help="MAD threshold for total reads (+/- X MADs)")
     parser.add_argument(
-        "--madsPassingReads", type=float, default=np.nan, help="MAD threshold for passing reads fraction (- x MADs)"
+        "--madsReads",
+        type=float,
+        default=np.nan,
+        help="MAD threshold for total reads (+/- X MADs)",
     )
-    parser.add_argument("--madsMito", type=float, default=np.nan, help="MAD threshold for mito. reads (+ x MADs)")
+    parser.add_argument(
+        "--madsPassingReads",
+        type=float,
+        default=np.nan,
+        help="MAD threshold for passing reads fraction (- x MADs)",
+    )
+    parser.add_argument(
+        "--madsMito",
+        type=float,
+        default=np.nan,
+        help="MAD threshold for mito. reads (+ x MADs)",
+    )
     # Optional argument to specify whether to generate statistics for internal report
     parser.add_argument("--internalReport", action="store_true", default=False)
     parser.add_argument("--isBarnyard", action="store_true", default=False)
@@ -676,11 +771,28 @@ def main():
         type=float,
         help="Minimum normalized KL divergence score to consider a bead as non-ambient",
     )
-    parser.add_argument("--beadScores", type=Path, required=False, help="Path to results of BeadFiltering process.")
+    parser.add_argument(
+        "--beadScores",
+        type=Path,
+        required=False,
+        help="Path to results of BeadFiltering process.",
+    )
     # Argument which indicates if data is from QuantumScale assay.
     parser.add_argument("--isQuantum", action="store_true", default=False)
-    parser.add_argument("--threads", type=int, required=False, default=1, help="Number of threads for duckdb")
-    parser.add_argument("--memory", type=str, required=False, default="8 GB", help="Memory allocated to task")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for duckdb",
+    )
+    parser.add_argument(
+        "--memory",
+        type=str,
+        required=False,
+        default="8 GB",
+        help="Memory allocated to task",
+    )
 
     args = parser.parse_args()
 
@@ -719,7 +831,9 @@ def main():
     """
     )
     load_barcodes_table(args.sampleMetrics, con, args.isBarnyard)
-    by_cols = "human_counts, mouse_counts, species, minor_frac" if args.isBarnyard else ""
+    by_cols = (
+        "human_counts, mouse_counts, species, minor_frac" if args.isBarnyard else ""
+    )
     bcs_df = con.sql(
         f"""
         SELECT cell_id, counts, pass, flags, totalReads, countedReads, mitoProp, {by_cols} FROM all_barcodes
@@ -738,12 +852,16 @@ def main():
         call_cell_barcodes(con, bcs_df, call_cells_options, human_cells, "human_counts")
         label_barnyard(bcs_df)
     else:
-        cellfinder_metrics = call_cell_barcodes(con, bcs_df, call_cells_options, np.ones(len(bcs_df), dtype=bool))
+        cellfinder_metrics = call_cell_barcodes(
+            con, bcs_df, call_cells_options, np.ones(len(bcs_df), dtype=bool)
+        )
         metrics.append(cellfinder_metrics)
 
     mad_stats = filter_cells(bcs_df, options=outlier_options)
     metrics.append(mad_stats)
-    update_barcodes_table(con, bcs_df, is_barnyard=args.isBarnyard, is_quantum=args.isQuantum)
+    update_barcodes_table(
+        con, bcs_df, is_barnyard=args.isBarnyard, is_quantum=args.isQuantum
+    )
 
     if args.isQuantum:
         filter_beads(con, args.filterBeads, args.beadScores, args.minDivergence)
@@ -773,12 +891,16 @@ def main():
     )
 
     # Write cellcalling metrics
-    pd.concat(metrics).to_csv(metrics_dir / f"{args.sample}_cellcalling_stats.csv", index=False)
+    pd.concat(metrics).to_csv(
+        metrics_dir / f"{args.sample}_cellcalling_stats.csv", index=False
+    )
 
     # Write filtered matrix for this sample
     # only need passing column for creating filtered matrix
     bcs_df = con.sql("SELECT cell_id, pass FROM all_barcodes").df().set_index("cell_id")
-    generate_filtered_matrix(sample_specific_file_paths, bcs_df, args.sample, args.roundCounts, con)
+    generate_filtered_matrix(
+        sample_specific_file_paths, bcs_df, args.sample, args.roundCounts, con
+    )
     con.close()
 
 

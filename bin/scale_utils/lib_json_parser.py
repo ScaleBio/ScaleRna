@@ -2,6 +2,7 @@ import json
 from collections import OrderedDict
 from pathlib import Path
 
+
 class LibJsonParser:
     """
     Parsed library structure json information
@@ -10,7 +11,9 @@ class LibJsonParser:
     def __init__(self, fname: Path):
         self.parent_dir = fname.parent
         self.json_contents = self.readJSON(fname)
-        self.all_whitelist_contents_by_alias, self.all_whitelist_contents_by_read = self.parse_all_whitelists()
+        self.all_whitelist_contents_by_alias, self.all_whitelist_contents_by_read = (
+            self.parse_all_whitelists()
+        )
         self.sample_barcode_fname = self.get_sample_barcode_fname()
 
     def get_sample_barcode_fname(self) -> Path:
@@ -24,7 +27,7 @@ class LibJsonParser:
             if barcode["name"] == self.json_contents["sample_barcode"]:
                 return self.parent_dir / barcode["sequences"]
         raise ValueError("Sample barcode not found in JSON contents")
-    
+
     def getMaxWellNumberAndLetter(self, fname: Path) -> tuple[str, int]:
         """
         Get maximum well coordinate from whitelist file
@@ -55,7 +58,7 @@ class LibJsonParser:
         Args:
             fname: Path to file
             sep: Separator used in the file
-        
+
         Returns:
             Tuple with first and last entry in the whitelist file
         """
@@ -64,7 +67,7 @@ class LibJsonParser:
             first_entry = lines[0].strip().split(sep)[0]
             last_entry = lines[-1].strip().split(sep)[0]
         return first_entry, last_entry
-    
+
     def load_whitelist(self, fname: Path):
         """
         Function to load a whitelist file and return a dictionary with alias and sequences
@@ -88,9 +91,13 @@ class LibJsonParser:
                 name = line[0]
                 seq = line[1:]
             if name in bcs:
-                raise ValueError(f"Duplicate barcode alias {name} found in whitelist file {fname}")
+                raise ValueError(
+                    f"Duplicate barcode alias {name} found in whitelist file {fname}"
+                )
             if seq in bcs.values():
-                raise ValueError(f"Duplicate barcode sequence {seq} found in whitelist file {fname}")
+                raise ValueError(
+                    f"Duplicate barcode sequence {seq} found in whitelist file {fname}"
+                )
             bcs[name] = seq
         return bcs
 
@@ -108,11 +115,13 @@ class LibJsonParser:
         all_whitelist_contents_by_read = {}
         for bc in self.json_contents["barcodes"]:
             if bc.get("type", None) not in ["library_index", "umi", "target"]:
-                    bcs = self.load_whitelist(self.parent_dir / bc["sequences"])
-                    if len(bcs) != len(set(bcs)):
-                        raise ValueError(f"Duplicate barcodes found in whitelist file: {bc['sequences']}")
-                    all_whitelist_contents_by_alias[bc["alias"]] = bcs
-                    all_whitelist_contents_by_read[bc["read"]] = bcs
+                bcs = self.load_whitelist(self.parent_dir / bc["sequences"])
+                if len(bcs) != len(set(bcs)):
+                    raise ValueError(
+                        f"Duplicate barcodes found in whitelist file: {bc['sequences']}"
+                    )
+                all_whitelist_contents_by_alias[bc["alias"]] = bcs
+                all_whitelist_contents_by_read[bc["read"]] = bcs
         return all_whitelist_contents_by_alias, all_whitelist_contents_by_read
 
     def readJSON(self, file: Path):
@@ -131,5 +140,3 @@ class LibJsonParser:
             pairs_hook = OrderedDict
             parsedJSON = json.loads(strStripped, object_pairs_hook=pairs_hook)
         return parsedJSON
-
-

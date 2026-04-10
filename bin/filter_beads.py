@@ -121,10 +121,26 @@ def main():
         help="Minimum number of counts to consider a barcode as a potential cell",
     )
     parser.add_argument(
-        "--sampleBarcode", type=str, required=False, default="RT", help="Sample barcode name used in assay"
+        "--sampleBarcode",
+        type=str,
+        required=False,
+        default="RT",
+        help="Sample barcode name used in assay",
     )
-    parser.add_argument("--threads", type=int, required=False, default=1, help="Number of threads for duckdb")
-    parser.add_argument("--memory", type=str, required=False, default="8 GB", help="Memory allocated to task")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of threads for duckdb",
+    )
+    parser.add_argument(
+        "--memory",
+        type=str,
+        required=False,
+        default="8 GB",
+        help="Memory allocated to task",
+    )
 
     args = parser.parse_args()
     mem_limit, mem_unit = args.memory.split()

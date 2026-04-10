@@ -11,9 +11,13 @@ from scaleplex_assignment import AssignmentCodes
 class Metrics:
     """Overall sample statistics"""
 
-    meanReadsPerCell: int = 0  # number of reads per cell. Should be multiplied by correct for ~usable amount
+    meanReadsPerCell: int = (
+        0  # number of reads per cell. Should be multiplied by correct for ~usable amount
+    )
     nUMIPerCell: int = 0  # median number of HASH UMI molecules per cell
-    passingPercent: int = 0  # percent of cells that had at least thresh Guide UMI's detected
+    passingPercent: int = (
+        0  # percent of cells that had at least thresh Guide UMI's detected
+    )
     maxFailPercent: int = 0  # percent of cells with maxFail assignment
     enrichFailPercent: int = 0  # percent of cells with enrichFail assignment
     indeterminatePercent: int = 0
@@ -27,9 +31,18 @@ class Metrics:
             print("nUMIPerCell", f"{self.nUMIPerCell:}", sep=",", file=out)
             print("passingPercent", f"{self.passingPercent:.1%}", sep=",", file=out)
             print("maxFailPercent", f"{self.maxFailPercent:.1%}", sep=",", file=out)
-            print("enrichFailPercent", f"{self.enrichFailPercent:.1%}", sep=",", file=out)
-            print("indeterminatePercent", f"{self.indeterminatePercent:.1%}", sep=",", file=out)
-            print("unexpectedPercent", f"{self.unexpectedPercent:.1%}", sep=",", file=out)
+            print(
+                "enrichFailPercent", f"{self.enrichFailPercent:.1%}", sep=",", file=out
+            )
+            print(
+                "indeterminatePercent",
+                f"{self.indeterminatePercent:.1%}",
+                sep=",",
+                file=out,
+            )
+            print(
+                "unexpectedPercent", f"{self.unexpectedPercent:.1%}", sep=",", file=out
+            )
             print("saturation", f"{self.saturation:.1%}", sep=",", file=out)
             print("readsInCells", f"{self.readsInCells:.1%}", sep=",", file=out)
 
@@ -57,7 +70,9 @@ def main(
 
     # Create output directories
     out_dir.mkdir(parents=True, exist_ok=True)
-    assigned_cells = rna[~rna["assigned_scaleplex"].isin(codes.errors)]  # remove cells with assignment errors
+    assigned_cells = rna[
+        ~rna["assigned_scaleplex"].isin(codes.errors)
+    ]  # remove cells with assignment errors
     scaleplex_stats = (
         assigned_cells.groupby("assigned_scaleplex")
         .agg(
@@ -77,13 +92,27 @@ def main(
     metrics.saturation = round(cell_stats_passing["Saturation"].median(0), 1)
     metrics.readsInCells = cell_stats_passing["totalReads"].sum() / total_reads
 
-    assignment_prop = cell_stats_passing["assigned_scaleplex"].value_counts(normalize=True)
+    assignment_prop = cell_stats_passing["assigned_scaleplex"].value_counts(
+        normalize=True
+    )
     metrics.passingPercent = assignment_prop.drop(codes.errors, errors="ignore").sum()
     # Report out different assignment error stats
-    metrics.indeterminatePercent = assignment_prop[codes.indeterminate] if codes.indeterminate in assignment_prop else 0
-    metrics.maxFailPercent = assignment_prop[codes.max_fail] if codes.max_fail in assignment_prop else 0
-    metrics.enrichFailPercent = assignment_prop[codes.enrich_fail] if codes.enrich_fail in assignment_prop else 0
-    metrics.unexpectedPercent = assignment_prop[codes.unexpected] if codes.unexpected in assignment_prop else 0
+    metrics.indeterminatePercent = (
+        assignment_prop[codes.indeterminate]
+        if codes.indeterminate in assignment_prop
+        else 0
+    )
+    metrics.maxFailPercent = (
+        assignment_prop[codes.max_fail] if codes.max_fail in assignment_prop else 0
+    )
+    metrics.enrichFailPercent = (
+        assignment_prop[codes.enrich_fail]
+        if codes.enrich_fail in assignment_prop
+        else 0
+    )
+    metrics.unexpectedPercent = (
+        assignment_prop[codes.unexpected] if codes.unexpected in assignment_prop else 0
+    )
 
     metrics.print(out_dir / "metrics.csv")
 

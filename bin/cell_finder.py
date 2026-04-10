@@ -18,7 +18,9 @@ import duckdb
 RNG = np.random.default_rng(42)
 
 
-def interpolate_unseen_species(smoothed_probabilities: np.ndarray, gene_sums: np.ndarray) -> np.ndarray:
+def interpolate_unseen_species(
+    smoothed_probabilities: np.ndarray, gene_sums: np.ndarray
+) -> np.ndarray:
     """
     (Subroutine of the Good-Turing algorithm used in construct_ambient_profile). For each gene not seen at all among
     ambient barcodes, interpolates the smoothed probability of encountering that gene among a count vector randomly
@@ -40,12 +42,16 @@ def interpolate_unseen_species(smoothed_probabilities: np.ndarray, gene_sums: np
         unseen_gene_counts, unseen_smoothed_probability_total / unseen_genes_total_count
     )
     posterior_expectations = smoothed_probabilities
-    posterior_expectations[unseen_gene_indices] = unseen_smoothed_probabilities.reshape(unseen_gene_indices.shape)
+    posterior_expectations[unseen_gene_indices] = unseen_smoothed_probabilities.reshape(
+        unseen_gene_indices.shape
+    )
 
     return posterior_expectations
 
 
-def construct_ambient_profile(gene_count_vector: np.ndarray, gene_sums: np.ndarray) -> np.ndarray:
+def construct_ambient_profile(
+    gene_count_vector: np.ndarray, gene_sums: np.ndarray
+) -> np.ndarray:
     """
     Constructs a proportion vector representing the ambient profile.
     Applies the Good-Turing algorithm to the summed unique transcript count vector of all ambient barcodes
@@ -73,7 +79,9 @@ def construct_ambient_profile(gene_count_vector: np.ndarray, gene_sums: np.ndarr
     smoothed_probabilities = smoothed_probabilities[0:-1]
 
     # Interpolate smoothed probabilities for genes with zero counts in the ambient profile
-    posterior_expectations = interpolate_unseen_species(smoothed_probabilities, gene_sums)
+    posterior_expectations = interpolate_unseen_species(
+        smoothed_probabilities, gene_sums
+    )
 
     return posterior_expectations
 
@@ -107,19 +115,30 @@ def estimate_alpha(
 
     min_count = 10  # Exclude barcodes with lower total counts
     barcode_inds = all_indices[ambient_barcodes][ambient_bc_sums >= min_count]
-    num_vecs = min(1000, len(barcode_inds))  # Number of ambient barcodes to sample for optimization
+    num_vecs = min(
+        1000, len(barcode_inds)
+    )  # Number of ambient barcodes to sample for optimization
     sampled_vecs = RNG.choice(barcode_inds, num_vecs, replace=False)
     discrete_mtx = io.load_partial_mtx(con, sampled_vecs)
-    discrete_mtx = sp.csc_array(discrete_mtx)[:, sampled_vecs]  # get the subset of barcodes
+    discrete_mtx = sp.csc_array(discrete_mtx)[
+        :, sampled_vecs
+    ]  # get the subset of barcodes
     discrete_mtx = sp.csr_array(discrete_mtx)[nzgenes, :]  # get the subset of genes
     discrete_mtx.data = np.round(discrete_mtx.data)
     vec = discrete_mtx.toarray().T
     ns = vec.sum(1)
     res = optimize.minimize_scalar(
-        method="bounded", fun=negative_log_likelihood, args=(vec, ns), bounds=(1, 10000), options={"xatol": 0.001}
+        method="bounded",
+        fun=negative_log_likelihood,
+        args=(vec, ns),
+        bounds=(1, 10000),
+        options={"xatol": 0.001},
     )
     if not res.success:
-        print(f"Alpha (overdispersion) optimization failed: {res.message}", file=sys.stderr)
+        print(
+            f"Alpha (overdispersion) optimization failed: {res.message}",
+            file=sys.stderr,
+        )
         return 3000  # Default alpha
     alpha = res.x
     return alpha
@@ -129,7 +148,7 @@ def compute_ambiguous_likelihoods(
     con: duckdb.DuckDBPyConnection,
     chunk: np.ndarray,
     nzgenes: np.ndarray,
-    scaled_ambient_profile: np.ndarray
+    scaled_ambient_profile: np.ndarray,
 ) -> np.ndarray:
     """
     Compute likelihoods for a chunk of ambiguous barcodes.
@@ -140,7 +159,9 @@ def compute_ambiguous_likelihoods(
     discrete_mtx.data = np.round(discrete_mtx.data)
     split_mtx = discrete_mtx.toarray().transpose()
     lls = [
-        dirichlet_multinomial.logpmf(split_mtx[i, :], [scaled_ambient_profile], split_mtx[i, :].sum())
+        dirichlet_multinomial.logpmf(
+            split_mtx[i, :], [scaled_ambient_profile], split_mtx[i, :].sum()
+        )
         for i in range(split_mtx.shape[0])
     ]
     return np.array(lls).ravel()  # convert nested lists to flat array
@@ -180,33 +201,51 @@ def test_ambiguous_barcodes(
     monte_carlo_p_values = np.ones(len(ambiguous_barcode_indices))
 
     # Obtain number of unique unique transcript counts among the ambiguous barcodes
-    total_count_by_ambiguous_barcode = pd.Series(io.sum_counts_by(con, ambiguous_barcode_indices, by="barcode"))
-    unique_total_counts_by_ambiguous_barcode = np.unique(total_count_by_ambiguous_barcode)
+    total_count_by_ambiguous_barcode = pd.Series(
+        io.sum_counts_by(con, ambiguous_barcode_indices, by="barcode")
+    )
+    unique_total_counts_by_ambiguous_barcode = np.unique(
+        total_count_by_ambiguous_barcode
+    )
     unique_total_count = unique_total_counts_by_ambiguous_barcode[0]
 
     # Calculate likelihood of all ambiguous barcode, split into dense matrix chunks for memory efficiency
     chunk_size = 10000
-    barcode_chunks = np.array_split(ambiguous_barcode_indices, np.ceil(len(ambiguous_barcode_indices) / chunk_size))
-    ambiguous_barcode_likelihoods = np.concatenate([
-        compute_ambiguous_likelihoods(con, chunk, nzgenes, scaled_ambient_profile)
-        for chunk in barcode_chunks
-    ])
+    barcode_chunks = np.array_split(
+        ambiguous_barcode_indices, np.ceil(len(ambiguous_barcode_indices) / chunk_size)
+    )
+    ambiguous_barcode_likelihoods = np.concatenate(
+        [
+            compute_ambiguous_likelihoods(con, chunk, nzgenes, scaled_ambient_profile)
+            for chunk in barcode_chunks
+        ]
+    )
 
     # Sample 10,000 vectors from the ambient profile, each with a starting sum of the lowest total unique transcript count above minUTC
-    dirichlet_probability_vectors = RNG.dirichlet(alpha=scaled_ambient_profile, size=mcvecs)
+    dirichlet_probability_vectors = RNG.dirichlet(
+        alpha=scaled_ambient_profile, size=mcvecs
+    )
     ambient_vectors = RNG.multinomial(unique_total_count, dirichlet_probability_vectors)
 
     # Compare the likelihoods of each of these 10,000 vectors to the likelihoods of each ambiguous barcode
     ambient_vector_likelihoods = [
-        dirichlet_multinomial.logpmf(ambient_vectors[i, :], [scaled_ambient_profile], ambient_vectors[i, :].sum())
+        dirichlet_multinomial.logpmf(
+            ambient_vectors[i, :], [scaled_ambient_profile], ambient_vectors[i, :].sum()
+        )
         for i in range(ambient_vectors.shape[0])
     ]
-    ambient_vector_likelihoods = np.array(ambient_vector_likelihoods).ravel()  # convert list to flat array
+    ambient_vector_likelihoods = np.array(
+        ambient_vector_likelihoods
+    ).ravel()  # convert list to flat array
     max_count = unique_total_counts_by_ambiguous_barcode[-1]
     # Faster to call random once here for all increments for each step and random vector below
     incrGenes = np.array(
         [
-            RNG.choice(len(scaled_ambient_profile), max_count + 1, p=dirichlet_probability_vectors[i])
+            RNG.choice(
+                len(scaled_ambient_profile),
+                max_count + 1,
+                p=dirichlet_probability_vectors[i],
+            )
             for i in range(mcvecs)
         ]
     )
@@ -220,12 +259,17 @@ def test_ambiguous_barcodes(
         # Update likelihoods for each next highest total unique transcript count by multiplying by closed form expression (see algorithm description)
         for i in range(len(ambient_vector_likelihoods)):
             index_of_gene_to_increment = incrGenes[i][unique_total_count - 1]
-            alpha_of_gene_incremented = scaled_ambient_profile[index_of_gene_to_increment]
+            alpha_of_gene_incremented = scaled_ambient_profile[
+                index_of_gene_to_increment
+            ]
             incremented_gene_count = ambient_vectors[i][index_of_gene_to_increment] + 1
             ambient_vectors[i][index_of_gene_to_increment] = incremented_gene_count
             ambient_vector_likelihoods[i] += np.log(
                 (unique_total_count / (unique_total_count + alpha - 1))
-                * ((incremented_gene_count + alpha_of_gene_incremented - 1) / incremented_gene_count)
+                * (
+                    (incremented_gene_count + alpha_of_gene_incremented - 1)
+                    / incremented_gene_count
+                )
             )
 
     return monte_carlo_p_values
@@ -259,7 +303,9 @@ def interpolate_gene_counts(gene_count_counts: dict[float, int]) -> dict[int, fl
     return linear_interpolations
 
 
-def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[float, int]) -> np.ndarray:
+def smooth_probabilities(
+    gene_count_vector: np.ndarray, gene_count_counts: dict[float, int]
+) -> np.ndarray:
     """
     (Subroutine of the Good-Turing algorithm used in construct_ambient_profile). For each gene, calculates the smoothed probability of encountering that gene among ambient barcodes given the contingent possibility of encountering genes not seen at all among those barcodes.
 
@@ -275,7 +321,10 @@ def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[
 
     # Perform loglinear least-squares regression
     a, b = lstsq(
-        np.c_[np.log(np.array(list(interpolations.keys()))), (1,) * len(np.array(list(interpolations.keys())))],
+        np.c_[
+            np.log(np.array(list(interpolations.keys()))),
+            (1,) * len(np.array(list(interpolations.keys()))),
+        ],
         np.log(np.array(list(interpolations.values()))),
     )[0]
 
@@ -283,7 +332,11 @@ def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[
     smoothed_gene_counts = {}
     use_smoothing = False
     for gene_count in sorted(gene_count_counts.keys()):
-        y = float(gene_count + 1) * np.exp(a * np.log(gene_count + 1) + b) / np.exp(a * np.log(gene_count) + b)
+        y = (
+            float(gene_count + 1)
+            * np.exp(a * np.log(gene_count + 1) + b)
+            / np.exp(a * np.log(gene_count) + b)
+        )
         next_higher_gene_count = gene_count + 1
         if next_higher_gene_count not in gene_count_counts:
             use_smoothing = True
@@ -296,7 +349,9 @@ def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[
         Nr = float(gene_count_counts[gene_count])
         Nr_next_higher = float(gene_count_counts[next_higher_gene_count])
         confidence_interval_width = 0.95 * np.sqrt(
-            float(next_higher_gene_count) ** 2 * (Nr_next_higher / Nr**2) * (1.0 + (Nr_next_higher / Nr))
+            float(next_higher_gene_count) ** 2
+            * (Nr_next_higher / Nr**2)
+            * (1.0 + (Nr_next_higher / Nr))
         )
         if abs(turing_estimate - y) > confidence_interval_width:
             smoothed_gene_counts[gene_count] = turing_estimate
@@ -311,7 +366,11 @@ def smooth_probabilities(gene_count_vector: np.ndarray, gene_count_counts: dict[
     p0 = gene_count_counts[1.0] / sum(gene_count_vector)
     smoothed_probabilities = np.array(
         [
-            ((1.0 - p0) * (smoothed_gene_counts[i] / total_smoothing)) if i in smoothed_gene_counts else i * 0.0
+            (
+                ((1.0 - p0) * (smoothed_gene_counts[i] / total_smoothing))
+                if i in smoothed_gene_counts
+                else i * 0.0
+            )
             for i in gene_count_vector
         ]
     )
@@ -358,14 +417,23 @@ def rescue_cells(
 
     ambient_profile = construct_ambient_profile(ambient_gene_sums, gene_sums)
     if not alpha:
-        alpha = estimate_alpha(ambient_bc_sums, ambient_profile, ambient_barcodes, nzgenes, all_indices, con)
-    stats['alpha'] = alpha
+        alpha = estimate_alpha(
+            ambient_bc_sums,
+            ambient_profile,
+            ambient_barcodes,
+            nzgenes,
+            all_indices,
+            con,
+        )
+    stats["alpha"] = alpha
     # Scale the ambient profile by the estimated overdispersion alpha for the Dirichlet multinomial distribution
     scaled_ambient_profile = alpha * ambient_profile
 
     # Test each ambiguous barcode for deviation from the ambient profile, obtaining a Monte Carlo p-value for each
-    monte_carlo_p_values = test_ambiguous_barcodes(con, scaled_ambient_profile, alpha, nzgenes, all_indices[ambiguous_barcodes])
-    stats['min_pval'] = monte_carlo_p_values.min()
+    monte_carlo_p_values = test_ambiguous_barcodes(
+        con, scaled_ambient_profile, alpha, nzgenes, all_indices[ambiguous_barcodes]
+    )
+    stats["min_pval"] = monte_carlo_p_values.min()
 
     # Multiple testing correction
     # Insert p=0 for all previously called certain cells
