@@ -373,7 +373,7 @@ def add_all_alias_for_index(
     all_aliases: list[str],
     col_name: str,
     scaleplex_col_name: str,
-    scaleplex_to_rna_mapping: dict[str:str],
+    rna_to_scaleplex_mapping: dict[str:str],
 ) -> list[list[str]]:
     """
     For a particular barcode (corresponds to @read), add all aliases from the whitelist file for each sample
@@ -385,7 +385,7 @@ def add_all_alias_for_index(
         col_name: Column name to add aliases for
         libraryStruct: Path to library structure json
         scaleplex_col_name: Column name to add scalePlex aliases for
-        scaleplex_to_rna_mapping: RNA PCR to ScalePlex PCR mapping
+        rna_to_scaleplex_mapping: RNA PCR to ScalePlex PCR mapping
 
     Returns:
         List of rows with all aliases added
@@ -402,7 +402,7 @@ def add_all_alias_for_index(
                     r_copy.insert(cols.index(scaleplex_col_name), scaleplex_alias)
                 else:
                     fail(
-                        f"ScalePlex alias not found for {alias} in {scaleplex_to_rna_mapping}"
+                        f"ScalePlex alias not found for {alias} in {rna_to_scaleplex_mapping}"
                     )
             rows_with_all_aliases.append(r_copy)
 
