@@ -312,10 +312,7 @@ def get_read_metrics(sample_stats: pd.DataFrame) -> list[Metric]:
     Args:
         sample_stats: Sample-level statistics
     """
-    # Need to divide by 100 because the raw value is a percentage
-    mapped_reads_perc = (
-        sample_stats.loc[("Reads", "mapped_to_too_many_loci_perc")].Value / 100
-    ) + sample_stats.loc[("Reads", "mapped_reads_perc")].Value
+    mapped_reads_perc = sample_stats.loc[("Reads", "mapped_reads_perc")].Value
     stats_obj = []
     if ("Reads", "total_sample_reads_post_barcode_demux") in sample_stats.index:
         stats_obj.append(

@@ -21,7 +21,7 @@ The files called _{SampleName}.{LibraryName}.report.html_ contain the summary re
 ### Read Metrics
 **Total Sample Reads**: The number of reads assigned to the sample based on the RT (sample) barcode, after barcode error reads are removed. This is before adapter trimming, alignment and duplicate filters \
 **Passing Sample Reads**: Reads passing pre-alignment filters, specifically RNA sequence length after Poly-A trimming ("_Too Short Error_") \
-**Reads Mapped to Genome**: The fraction of _Passing Reads_ that are aligned anywhere to the genome. This includes multimapping reads \
+**Reads Mapped to Genome**: The fraction of _Passing Reads_ that are aligned anywhere to the genome. Includes reads uniquely mapped and multimapped to ≤6 loci (from per-barcode stats), plus an estimate of reads mapping to >6 loci derived by applying the global too-many-loci rate to the valid-barcode unaccounted pool \
 **Passing Read Alignments**: The fraction of mapped reads retained after alignment filtering; specifically excluding multimappers to more than 6 (`starMaxLoci`) loci \
 **Reads Mapped to Transcriptome**: The fraction of _Passing Read Alignments_ that match one or more annotated genes (exon or intron, in sense direction) \
 **Exonic Reads**: The fraction of _Reads Mapped to Transcriptome_ overlapping an exon in the sense direction \

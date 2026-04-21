@@ -36,6 +36,22 @@ def parse_star_log(reads: dict[str, float], star_log: Path) -> dict[str, float]:
                 reads["mismatch_rate_per_base_perc"] = float(
                     line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]
                 )
+            if "Number of input reads" in line:
+                reads["n_input_reads"] = float(
+                    line.split("Number of input reads |")[1].strip()
+                )
+            if "Uniquely mapped reads number" in line:
+                reads["n_input_uniquely_mapped"] = float(
+                    line.split("Uniquely mapped reads number |")[1].strip()
+                )
+            if "Number of reads mapped to multiple loci" in line:
+                reads["n_input_multi_mapped"] = float(
+                    line.split("Number of reads mapped to multiple loci |")[1].strip()
+                )
+            if "Number of reads mapped to too many loci" in line:
+                reads["n_input_too_many_loci"] = float(
+                    line.split("Number of reads mapped to too many loci |")[1].strip()
+                )
             if "% of reads mapped to too many loci |" in line:
                 reads["mapped_to_too_many_loci_perc"] = float(
                     line.split("% of reads mapped to too many loci |")[1]
@@ -113,12 +129,27 @@ def calculate_sample_stats(
     )
 
     reads = sample_stats["Reads"]
+    reads = parse_star_log(reads, star_log)
     if total_sample_reads != 0:
         reads["total_sample_reads_post_barcode_demux"] = total_sample_reads
     reads["total_reads"] = query_results["total_reads"]
     reads["counted_reads"] = query_results["counted_reads"]
     reads["mapped_reads"] = query_results["mapped_reads"]
-    reads["mapped_reads_perc"] = reads["mapped_reads"] / reads["total_reads"]
+    n_input_unaccounted = (
+        reads["n_input_reads"]
+        - reads["n_input_uniquely_mapped"]
+        - reads["n_input_multi_mapped"]
+    )
+    rate_too_many_loci = (
+        reads["n_input_too_many_loci"] / n_input_unaccounted
+        if n_input_unaccounted > 0
+        else 0.0
+    )
+    n_valid_unaccounted = reads["total_reads"] - reads["mapped_reads"]
+    estimated_too_many_loci_valid = rate_too_many_loci * n_valid_unaccounted
+    reads["mapped_reads_perc"] = (
+        reads["mapped_reads"] + estimated_too_many_loci_valid
+    ) / reads["total_reads"]
     reads["gene_reads"] = query_results["gene_reads"]
     reads["gene_reads_perc"] = reads["gene_reads"] / reads["mapped_reads"]
     reads["exon_reads"] = query_results["exon_reads"]
@@ -129,7 +160,6 @@ def calculate_sample_stats(
     reads["mito_reads_perc"] = reads["mito_reads"] / reads["mapped_reads"]
     reads["counts"] = query_results["counts"]
     reads["saturation"] = 1 - reads["counts"] / reads["counted_reads"]
-    reads = parse_star_log(reads, star_log)
 
     cells = sample_stats["Cells"]
     cells["cells_called"] = query_results["cells_called"]
