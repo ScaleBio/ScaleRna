@@ -9,7 +9,6 @@ import csv
 import gzip
 import numpy as np
 import pandas as pd
-import json
 from scipy.sparse import csr_matrix
 from scipy.io import mmwrite
 from scale_utils.lib_json_parser import LibJsonParser

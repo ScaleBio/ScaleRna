@@ -11,7 +11,6 @@ import dataclasses
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import sys
 from typing import Any, List, Dict
 import xml.etree.ElementTree as ET
 from scale_utils.validation import validateName

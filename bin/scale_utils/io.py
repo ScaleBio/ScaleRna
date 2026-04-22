@@ -1,6 +1,5 @@
 """Utilities related to file I/O and parsing"""
 
-import json
 import gzip
 import duckdb
 import numpy as np

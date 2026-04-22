@@ -295,40 +295,6 @@ def filter_cells(bcs_df: pd.DataFrame, options: OutlierOptions) -> pd.DataFrame:
     return pd.DataFrame.from_records(stats, columns=["Category", "Metric", "Value"])
 
 
-def parse_star_log(reads: dict[str, float], star_log: Path) -> dict[str, float]:
-    """
-    Parse STAR alignment log file to extract additional read statistics
-
-    Args:
-        reads: Dictionary containing read statistics
-        star_log: Path to the STARsolo log file
-
-    Returns:
-        Updated reads dictionary with additional statistics
-    """
-    with open(star_log, "r") as f:
-        for line in f:
-            if "Average input read length" in line:
-                reads["avg_trimmed_read_len"] = float(
-                    line.split("Average input read length |")[1].strip()
-                )
-            if "Average mapped length" in line:
-                reads["avg_mapped_len"] = float(
-                    line.split("Average mapped length |")[1].strip()
-                )
-            if "Mismatch rate per base, % |" in line:
-                reads["mismatch_rate_per_base_perc"] = float(
-                    line.split("Mismatch rate per base, % |")[1].strip().split("%")[0]
-                )
-            if "% of reads mapped to too many loci |" in line:
-                reads["mapped_to_too_many_loci_perc"] = float(
-                    line.split("% of reads mapped to too many loci |")[1]
-                    .strip()
-                    .split("%")[0]
-                )
-    return reads
-
-
 def validate_bcs_df_order(bcs_df: pd.DataFrame, star_barcodes_path: Path) -> None:
     """Check that the order of bcs_df matches barcodes.tsv from merged star output
 
