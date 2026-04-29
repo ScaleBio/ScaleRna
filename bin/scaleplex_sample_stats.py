@@ -57,7 +57,20 @@ def main(
     out_dir: Path,
 ):
     metrics = Metrics()
-    rna = pl.scan_csv(all_cells).collect().to_pandas().set_index("cell_id")
+    # Force numeric dtypes explicitly to prevent incorrect type inference
+    rna = (
+        pl.scan_csv(
+            all_cells,
+            schema_overrides={
+                "totalReads": pl.Float64,
+                "counts": pl.Float64,
+                "genes": pl.Float64,
+            },
+        )
+        .collect()
+        .to_pandas()
+        .set_index("cell_id")
+    )
     cell_stats_passing = (
         pl.scan_parquet(cell_stats)
         .filter(pl.col("pass"))
