@@ -15,7 +15,7 @@ For ScaleBio QuantumScale RNA libraries the RT barcode is in read 2, the bead ce
 `CreateFastqForIndexReads,1`
 
 ### Using Fastq Files as Workflow Input
-Set `--fastqDir` to the directory containing the fastq files. All the fastq files need to be present in this directory or its subdirectories. The only requirement when using fastq files as input to the workflow is to ensure that both index1 and index2 fastq files are present.
+Set `--fastqDir` to the directory containing the fastq files. All the fastq files need to be present in this directory or its subdirectories. When using fastq files as input to the workflow, it is necessary to ensure that both index1 and index2 fastq files are present. Fastq filenames must also be unique across all subdirectories under `--fastqDir`; the workflow requires unique base filenames and will exit with an error if duplicates are found.
 
 ### ScaleRna v1 kits
 #### RNA kit v1.0

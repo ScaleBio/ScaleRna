@@ -331,7 +331,18 @@ main:
 		)
 		fqs = BclConvert.out.fastq.flatten()
 	} else if (fqDir != null) {
-		fqs = Channel.fromPath("$fqDir/**fastq.gz", checkIfExists: true)
+		def fqFileList = file("$fqDir/**fastq.gz", checkIfExists: true)
+		def dupsByName = fqFileList.groupBy { it.getName() }.findAll { _, files -> files.size() > 1 }
+		if (dupsByName) {
+			def details = dupsByName
+				.collect { name, files -> "  ${name}:\n    " + files.collect { it.toString() }.join("\n    ") }
+				.join("\n")
+			ParamLogger.throwError(
+				"Duplicate fastq filenames found under --fastqDir. " +
+				"Each fastq filename must be unique across all subdirectories of fastqDir:\n${details}"
+			)
+		}
+		fqs = Channel.fromPath(fqFileList)
 	} else {
 		ParamLogger.throwError("Must specify either '--runFolder' or '--fastqDir' when running alignment")
 	}
