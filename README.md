@@ -5,7 +5,7 @@ This is a Nextflow workflow to run analysis of ScaleBio Single Cell RNA Sequenci
 The QuantumScale RNA assay is supported with version 2.0 and later.
 
 ## Getting started
-* First install [Nextflow](http://www.nextflow.io) (version 23.10 or later)
+* First install [Nextflow](http://www.nextflow.io) (either v25.10.2 or v25.04.7)
 * Download this workflow to your machine
 * Setup [dependencies](docs/dependencies.md)
 * Launch the small pipeline [test run](#workflow-test)
