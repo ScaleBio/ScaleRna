@@ -73,20 +73,24 @@ Per-cell ScalePlex library metrics for all detected barcodes are stored in `scal
 - Sample reporting, as defined by the individual rows of the Sample Barcode Table (samples.csv), will also have an updated "ScalePlex" tab that summarizes the performance of the ScalePlex data associated in the "ScalePlex Metrics" table. At a high level, these metrics are calculated much in the same way as the [RNA sample level metrics](qcReport.md), such as Reads Per Cell, Counts Per cell, Saturation, and Reads in Cells, but they now reference the ScalePlex library fraction rather than the RNA material. In addition, we also report the "Percent of Cells with Assigned ScalePlex". Critically, the cells referenced here are defined as barcodes that were "called" a cell in the RNA analysis, so "Percent of Cells with Assigned ScalePlex" says how many cells called by RNA also had a valid ScalePlex assignment.
 
 - Other Reporting Figures:
-    - Assigned ScalePlex Cell Counts: Bar chart of number of cells assigned each scaleplex well of origin
+    - Assigned ScalePlex Cell Counts: Bar chart of number of cells assigned each ScalePlex well of origin
     - Saturation Per Cell: Scatter plot of Saturation vs ScalePlex reads per barcode
     - Top ScalePlex Fraction: Histogram of the the percent of ScalePlex counts per cell that are originating from the top two ScalePlex oligos per cell. This ratio is important because in ideal scenarios, we are enriching for two ScalePlex oligos per cell, that in combination uniquely mark the fixation well of origin. Thus, a peak close to 1 is ideal. If the distribution shifts left, then using the "fc" method may improve your assignment.
     - Fixation Plate Assigned ScalePlex: Plate map of the ScalePlex fixation plate, with values corresponding to the number of cells assigned to each well
     - ScalePlex Assignment Errors:
         - Indeterminate
-            - A cell is labeled “Indeterminate” in the “bg” method when no ScalePlex oligos in that cell pass the statistical background test (i.e. `passing_scaleplex` is `No_Pass`)
+            - A cell is labeled “Indeterminate” in the “bg” method when no ScalePlex oligos in that cell pass the statistical background test (i.e. `passing_scaleplex` is `No_Pass`).
+            - Solution: Verify fixation protocol.
         - Max_Fail
-            - A cell is labeled “Max_Fail” in the “bg” method when at least one of the top two ScalePlex oligos detected in that cell were not among those that passed the statistical background test for that cell
+            - A cell is labeled “Max_Fail” in the “bg” method when at least one of the top two ScalePlex oligos detected in that cell were not among those that passed the statistical background test for that cell.
+            - Solution: Check oligo quality and concentration.
         - Enrich_Fail
-            - A cell is labeled “Enrich_Fail” in the “bg” method when `scalePlexPercentFromTopTwo` is enabled and the cell fails to pass that enrichment threshold
-            - A cell is labeled “Enrich_Fail” in the “fc” method when the fold change of the second highest ScalePlex oligo counts over the third highest ScalePlex oligo count is ≤ `scalePlexFCThreshold` (default: 2), or when no second oligo is detected
+            - A cell is labeled “Enrich_Fail” in the “bg” method when `scalePlexPercentFromTopTwo` is enabled and the cell fails to pass that enrichment threshold.
+            - A cell is labeled “Enrich_Fail” in the “fc” method when the fold change of the second highest ScalePlex oligo counts over the third highest ScalePlex oligo count is ≤ `scalePlexFCThreshold` (default: 2), or when no second oligo is detected.
+            - Solution: Adjust quality parameters.
         - Unexpected
-            - A cell is labeled “Unexpected” when it passed all other assignment criteria for either the “bg” or “fc” method but the two top ScalePlex oligos in combination do not correspond to a valid fixation plate well. This can happen when:
-                - the top two oligos are from the same row or same column rather than a valid row+column combination
-                - the user supplied a `scalePlexBarcodes` constraint for the sample and the assignment falls outside the specified wells
+            - A cell is labeled “Unexpected” when it passed all other assignment criteria for either the “bg” or “fc” method, but the two top ScalePlex oligos in combination do not correspond to a valid fixation plate well. This can happen when:
+                - The top two oligos are from the same row or same column rather than a valid row+column combination.
+                - The user supplied a `scalePlexBarcodes` constraint for the sample and the assignment falls outside the specified wells.
+             - Solution: Check plate layout and oligo design.
     - Per-well ScalePlex RNA Metrics: RNA library metrics and number of cells for each ScalePlex assignment group present within the sample. These are also summarized in the `<sample>.scaleplex_stats.csv` file in the `csv` folder of the reports directory. 
