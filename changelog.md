@@ -1,4 +1,7 @@
 # Version 2.1
+## 2.1.2
+* Add new v2.0 QuantumScaleRNA Default samplesheets for FASTQ generation and update documentation to recommend them as the default (QSR-1 to QSR-12) for datasets not using QSR-P
+
 ## 2.1.1
 * Fix "Reads Mapped to Genome" metric with estimated reads mapping to too many loci (>6); values may differ from 2.1.0
 * Fix numeric column type handling in ScalePlex sample stats output
